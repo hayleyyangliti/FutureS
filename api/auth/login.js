@@ -1,25 +1,32 @@
-const { jsonHeaders, restUrl, sendJson } = require('../_supabase');
+const { config, send, supabase } = require('../_supabase');
 
-module.exports = async function login(req, res) {
-  if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method Not Allowed' });
-  const { employeeNo, password } = req.body || {};
-  const workNo = String(employeeNo || '').trim();
-  if (!/^\d+$/.test(workNo) || !password) return sendJson(res, 400, { error: '请输入工号和密码。' });
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY || !process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.LOGIN_EMAIL_DOMAIN) {
-    return sendJson(res, 503, { error: '登录服务环境变量尚未配置。' });
+module.exports = async (req, res) => {
+  if (req.method !== 'POST') return send(res, 405, { error: 'METHOD_NOT_ALLOWED' });
+  try {
+    const employeeNo = String(req.body?.employeeNo || '').trim();
+    const password = String(req.body?.password || '');
+    if (!/^\d+$/.test(employeeNo) || !password) return send(res, 400, { error: 'INVALID_CREDENTIALS' });
+
+    const rows = await supabase(`/rest/v1/profiles?employee_no=eq.${encodeURIComponent(employeeNo)}&select=*`, {
+      headers: { Accept: 'application/json' },
+    });
+    const profile = rows?.[0];
+    if (!profile?.email_prefix) return send(res, 401, { error: 'INVALID_CREDENTIALS' });
+
+    const { url, anonKey } = config();
+    const domain = process.env.LOGIN_EMAIL_DOMAIN || 'gtht.com';
+    const email = `${profile.email_prefix}@${domain}`;
+    const tokenResponse = await fetch(`${url}/auth/v1/token?grant_type=password`, {
+      method: 'POST',
+      headers: { apikey: anonKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const tokenData = await tokenResponse.json();
+    if (!tokenResponse.ok || !tokenData.access_token) return send(res, 401, { error: 'INVALID_CREDENTIALS' });
+
+    return send(res, 200, { accessToken: tokenData.access_token, profile });
+  } catch (error) {
+    console.error('login failed', error);
+    return send(res, 500, { error: 'LOGIN_UNAVAILABLE' });
   }
-  const profileResponse = await fetch(restUrl(`profiles?employee_no=eq.${encodeURIComponent(workNo)}&select=email_prefix&limit=1`), {
-    headers: jsonHeaders(process.env.SUPABASE_SERVICE_ROLE_KEY)
-  });
-  const profiles = await profileResponse.json();
-  if (!profileResponse.ok || !profiles[0]?.email_prefix) return sendJson(res, 401, { error: '工号或密码错误。' });
-  const email = `${profiles[0].email_prefix}@${process.env.LOGIN_EMAIL_DOMAIN}`;
-  const response = await fetch(`${process.env.SUPABASE_URL.replace(/\/$/, '')}/auth/v1/token?grant_type=password`, {
-    method: 'POST',
-    headers: { apikey: process.env.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password })
-  });
-  const data = await response.json();
-  if (!response.ok) return sendJson(res, response.status, { error: '工号或密码错误。' });
-  return sendJson(res, 200, { accessToken: data.access_token, refreshToken: data.refresh_token, expiresIn: data.expires_in });
 };

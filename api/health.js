@@ -1,10 +1,10 @@
-module.exports = async function health(req, res) {
-  res.setHeader('Cache-Control', 'no-store');
-  res.status(200).json({
-    ok: true,
-    service: 'futures-content-engine-api',
-    supabaseConfigured: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
-    authConfigured: Boolean(process.env.SUPABASE_ANON_KEY && process.env.LOGIN_EMAIL_DOMAIN),
-    timestamp: new Date().toISOString()
-  });
+const { config, send } = require('./_supabase');
+
+module.exports = (req, res) => {
+  try {
+    config();
+    return send(res, 200, { ok: true, service: 'futures-content-engine' });
+  } catch (error) {
+    return send(res, 503, { ok: false, error: 'ENVIRONMENT_NOT_CONFIGURED' });
+  }
 };

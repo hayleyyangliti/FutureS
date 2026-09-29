@@ -1,31 +1,50 @@
-const jsonHeaders = key => ({ apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' });
+const required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY'];
 
-function configured() {
-  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+function config() {
+  const missing = required.filter((name) => !process.env[name]);
+  if (missing.length) throw new Error(`Missing environment variables: ${missing.join(', ')}`);
+  return {
+    url: process.env.SUPABASE_URL.replace(/\/$/, ''),
+    anonKey: process.env.SUPABASE_ANON_KEY,
+    serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  };
 }
 
-function restUrl(path) {
-  return `${process.env.SUPABASE_URL.replace(/\/$/, '')}/rest/v1/${path}`;
+function send(res, status, payload) {
+  res.status(status).json(payload);
 }
 
-async function getProfile(req) {
-  const authorization = req.headers.authorization || '';
-  if (!authorization.startsWith('Bearer ')) return null;
-  const userResponse = await fetch(`${process.env.SUPABASE_URL.replace(/\/$/, '')}/auth/v1/user`, {
-    headers: { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY, Authorization: authorization }
+async function supabase(path, options = {}, useServiceKey = true) {
+  const { url, anonKey, serviceKey } = config();
+  const headers = {
+    apikey: useServiceKey ? serviceKey : anonKey,
+    ...(options.headers || {}),
+  };
+  const response = await fetch(`${url}${path}`, { ...options, headers });
+  const raw = await response.text();
+  let body = raw;
+  try { body = raw ? JSON.parse(raw) : null; } catch (_) {}
+  if (!response.ok) {
+    const message = body?.message || body?.msg || `Supabase request failed (${response.status})`;
+    throw new Error(message);
+  }
+  return body;
+}
+
+function bearer(req) {
+  const value = req.headers.authorization || '';
+  return value.startsWith('Bearer ') ? value.slice(7) : '';
+}
+
+async function currentProfile(req) {
+  const token = bearer(req);
+  if (!token) throw new Error('UNAUTHORIZED');
+  const user = await supabase('/auth/v1/user', { headers: { Authorization: `Bearer ${token}` } }, false);
+  const rows = await supabase(`/rest/v1/profiles?auth_user_id=eq.${encodeURIComponent(user.id)}&select=*`, {
+    headers: { Accept: 'application/json' },
   });
-  if (!userResponse.ok) return null;
-  const user = await userResponse.json();
-  const profileResponse = await fetch(restUrl(`profiles?auth_user_id=eq.${encodeURIComponent(user.id)}&select=*&limit=1`), {
-    headers: jsonHeaders(process.env.SUPABASE_SERVICE_ROLE_KEY)
-  });
-  const profiles = await profileResponse.json();
-  return profiles[0] ? { user, profile: profiles[0] } : null;
+  if (!rows?.[0]) throw new Error('PROFILE_NOT_FOUND');
+  return { user, profile: rows[0] };
 }
 
-function sendJson(res, status, data) {
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  return res.status(status).json(data);
-}
-
-module.exports = { configured, getProfile, jsonHeaders, restUrl, sendJson };
+module.exports = { config, send, supabase, currentProfile };

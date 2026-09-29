@@ -1,18 +1,17 @@
-create extension if not exists pgcrypto;
+-- 期市内容引擎：测试发布初始化脚本
+-- 在 Supabase → SQL Editor 中整段运行。可重复运行。
 
 create table if not exists public.profiles (
   id uuid primary key default gen_random_uuid(),
   auth_user_id uuid unique references auth.users(id) on delete cascade,
-  employee_no text unique,
+  employee_no text unique not null,
   display_name text not null,
-  email_prefix text unique,
+  email_prefix text unique not null,
   department text,
   role text not null default 'user' check (role in ('user', 'developer')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-
-alter table public.profiles add column if not exists auth_user_id uuid unique references auth.users(id) on delete cascade;
 
 create table if not exists public.content_cases (
   id uuid primary key default gen_random_uuid(),
@@ -30,10 +29,6 @@ create table if not exists public.content_cases (
   saved_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-
-create index if not exists content_cases_library_saved_at_idx on public.content_cases (library, saved_at desc);
-create index if not exists content_cases_type_subtype_idx on public.content_cases (content_type, subtype);
-create index if not exists content_cases_content_platform_id_idx on public.content_cases (content_platform_id);
 
 create table if not exists public.prompt_overrides (
   id uuid primary key default gen_random_uuid(),
@@ -54,10 +49,16 @@ create table if not exists public.content_share_requests (
   created_at timestamptz not null default now()
 );
 
+create index if not exists content_cases_library_saved_at_idx
+  on public.content_cases (library, saved_at desc);
+create index if not exists content_cases_type_subtype_idx
+  on public.content_cases (content_type, subtype);
+create index if not exists content_cases_content_platform_id_idx
+  on public.content_cases (content_platform_id);
+
 alter table public.profiles enable row level security;
 alter table public.content_cases enable row level security;
 alter table public.prompt_overrides enable row level security;
 alter table public.content_share_requests enable row level security;
 
--- 本发布包的 Vercel 接口使用 service-role key，因此可在 RLS 开启状态下工作。
--- 正式接入登录体系后，请根据 auth.uid() 和 role 增加面向客户端的精细化策略。
+-- 测试包的 Vercel 接口通过 service_role 在服务端访问数据库；浏览器不会获得该密钥。
