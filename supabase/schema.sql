@@ -49,6 +49,45 @@ create table if not exists public.content_share_requests (
   created_at timestamptz not null default now()
 );
 
+-- 兼容此前已创建过的旧表：create table if not exists 不会为旧表补充字段。
+-- 以下语句仅补字段，不会删除已有的案例或用户资料。
+alter table public.profiles add column if not exists auth_user_id uuid;
+alter table public.profiles add column if not exists employee_no text;
+alter table public.profiles add column if not exists display_name text;
+alter table public.profiles add column if not exists email_prefix text;
+alter table public.profiles add column if not exists department text;
+alter table public.profiles add column if not exists role text default 'user';
+alter table public.profiles add column if not exists created_at timestamptz default now();
+alter table public.profiles add column if not exists updated_at timestamptz default now();
+
+alter table public.content_cases add column if not exists library text default 'shared';
+alter table public.content_cases add column if not exists owner_id uuid;
+alter table public.content_cases add column if not exists content_type text;
+alter table public.content_cases add column if not exists subtype text;
+alter table public.content_cases add column if not exists title text;
+alter table public.content_cases add column if not exists folder_path text default '未归档';
+alter table public.content_cases add column if not exists content_platform_id text;
+alter table public.content_cases add column if not exists content text;
+alter table public.content_cases add column if not exists attachments jsonb default '[]'::jsonb;
+alter table public.content_cases add column if not exists sources jsonb default '[]'::jsonb;
+alter table public.content_cases add column if not exists starred boolean default false;
+alter table public.content_cases add column if not exists saved_at timestamptz default now();
+alter table public.content_cases add column if not exists updated_at timestamptz default now();
+
+update public.content_cases set library = 'shared' where library is null;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.profiles'::regclass
+      and conname = 'profiles_auth_user_id_key'
+  ) then
+    alter table public.profiles
+      add constraint profiles_auth_user_id_key unique (auth_user_id);
+  end if;
+end $$;
+
 create index if not exists content_cases_library_saved_at_idx
   on public.content_cases (library, saved_at desc);
 create index if not exists content_cases_type_subtype_idx
