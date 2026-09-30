@@ -3,7 +3,7 @@
   const tokenKey = 'futures-content-engine:access-token';
   const loginButton = document.getElementById('confirmLogin');
   const loginError = document.getElementById('loginError');
-  const employeeInput = document.getElementById('loginId');
+  const emailInput = document.getElementById('loginId');
   const passwordInput = document.getElementById('loginPassword');
   const legacyUpdate = updateLoginUi;
 
@@ -51,11 +51,11 @@
   }
 
   loginButton.onclick = async () => {
-    const employeeNo = employeeInput.value.replace(/\s/g, '');
+    const email = emailInput.value.trim().toLowerCase();
     const password = passwordInput.value;
     loginError.textContent = '';
-    if (!/^\d+$/.test(employeeNo) || !password) {
-      loginError.textContent = '请输入工号和密码。';
+    if (!/^[^\s@]+@gtht\.com$/.test(email) || !password) {
+      loginError.textContent = '请输入完整的 @gtht.com 邮箱和密码。';
       return;
     }
     loginButton.disabled = true;
@@ -64,7 +64,7 @@
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ employeeNo, password }),
+        body: JSON.stringify({ email, password }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'INVALID_CREDENTIALS');
@@ -73,9 +73,12 @@
       loginModal.close();
       passwordInput.value = '';
       updateLoginUi();
-      toast(`欢迎登录，${currentAccount.name}`);
-    } catch (_) {
-      loginError.textContent = '工号或密码错误，或系统暂未完成配置。';
+      toast(`欢迎登录，${currentAccount.chineseName || currentAccount.name}`);
+    } catch (error) {
+      loginError.textContent = error.message === 'SUPABASE_KEY_REJECTED'
+        ? '登录服务暂不可用，请联系开发者。'
+        : error.message === 'PROFILE_NOT_FOUND' ? '账号资料尚未配置，请联系开发者。'
+        : '邮箱或密码错误，或登录服务暂不可用，请重试。';
     } finally {
       loginButton.disabled = false;
       loginButton.textContent = '登录';
