@@ -1,7 +1,8 @@
-const required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY'];
+const required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY'];
 
-function config() {
-  const missing = required.filter((name) => !process.env[name]);
+function config(requireServiceKey = true) {
+  const expected = requireServiceKey ? [...required, 'SUPABASE_SERVICE_ROLE_KEY'] : required;
+  const missing = expected.filter((name) => !process.env[name]);
   if (missing.length) throw new Error(`Missing environment variables: ${missing.join(', ')}`);
   return {
     url: process.env.SUPABASE_URL.replace(/\/$/, ''),
@@ -15,7 +16,7 @@ function send(res, status, payload) {
 }
 
 async function supabase(path, options = {}, useServiceKey = true) {
-  const { url, anonKey, serviceKey } = config();
+  const { url, anonKey, serviceKey } = config(useServiceKey);
   const headers = {
     apikey: useServiceKey ? serviceKey : anonKey,
     ...(options.headers || {}),
@@ -39,12 +40,21 @@ function bearer(req) {
 async function currentProfile(req) {
   const token = bearer(req);
   if (!token) throw new Error('UNAUTHORIZED');
-  const user = await supabase('/auth/v1/user', { headers: { Authorization: `Bearer ${token}` } }, false);
-  const rows = await supabase(`/rest/v1/profiles?auth_user_id=eq.${encodeURIComponent(user.id)}&select=*`, {
-    headers: { Accept: 'application/json' },
+  const { url, anonKey } = config(false);
+  const response = await fetch(`${url}/rest/v1/rpc/current_profile`, {
+    method: 'POST',
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
   });
-  if (!rows?.[0]) throw new Error('PROFILE_NOT_FOUND');
-  return { user, profile: rows[0] };
+  const rows = await response.json().catch(() => []);
+  if (!response.ok) throw new Error('UNAUTHORIZED');
+  const profile = Array.isArray(rows) ? rows[0] : null;
+  if (!profile) throw new Error('PROFILE_NOT_FOUND');
+  return { user: { id: profile.auth_user_id }, profile };
 }
 
 module.exports = { config, send, supabase, currentProfile };

@@ -58,6 +58,11 @@ module.exports = async (req, res) => {
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload?.success) {
+      console.error('OmniData hotspot request failed', {
+        status: response.status,
+        detail: payload?.detail || payload?.error || null,
+        spider: OMNIDATA_SPIDER,
+      });
       return send(res, 502, { error: 'OMNIDATA_REQUEST_FAILED' });
     }
 
