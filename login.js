@@ -13,12 +13,14 @@ module.exports = async (req, res) => {
     const profile = rows?.[0];
     if (!profile?.email_prefix) return send(res, 401, { error: 'INVALID_CREDENTIALS' });
 
-    const { url, anonKey } = config();
+    const { url, serviceKey } = config();
     const domain = process.env.LOGIN_EMAIL_DOMAIN || 'gtht.com';
     const email = `${profile.email_prefix}@${domain}`;
     const tokenResponse = await fetch(`${url}/auth/v1/token?grant_type=password`, {
       method: 'POST',
-      headers: { apikey: anonKey, 'Content-Type': 'application/json' },
+      // 此请求仅在 Vercel 服务端执行，使用 Secret key 可避免前端发布密钥
+      // 填写错误或轮换后导致的密码授权失败。
+      headers: { apikey: serviceKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
     const rawTokenData = await tokenResponse.text();
@@ -26,12 +28,16 @@ module.exports = async (req, res) => {
     try { tokenData = rawTokenData ? JSON.parse(rawTokenData) : {}; } catch (_) { tokenData = {}; }
     if (!tokenResponse.ok || !tokenData.access_token) {
       // 不记录密码、Token 或 Key；仅记录 Supabase 返回的安全诊断信息。
+      const message = tokenData.error_description || tokenData.msg || tokenData.message || '';
+      const configurationIssue = /api key|apikey|jwt/i.test(message);
       console.warn('Supabase password grant rejected', {
         status: tokenResponse.status,
         error: tokenData.error || null,
-        message: tokenData.error_description || tokenData.msg || tokenData.message || null,
+        message: message || null,
       });
-      return send(res, 401, { error: 'INVALID_CREDENTIALS' });
+      return send(res, 401, {
+        error: configurationIssue ? 'SUPABASE_KEY_REJECTED' : 'INVALID_CREDENTIALS',
+      });
     }
 
     return send(res, 200, { accessToken: tokenData.access_token, profile });
