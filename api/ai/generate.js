@@ -24,10 +24,10 @@ function buildPrompt({ topic, instruction, contentType, subtype, candidateMode }
   const format = candidateMode
     ? `只输出 JSON，不要 Markdown，不要解释：
 {"candidates":[{"title":"候选标题1","body":"候选正文1"},{"title":"候选标题2","body":"候选正文2"},{"title":"候选标题3","body":"候选正文3"}]}`
-    : `只输出 JSON，不要 Markdown，不要解释：
-{"title":"内容标题","body":"可直接编辑的完整正文","riskNote":"风险提示","sources":["待运营核验的公开资料类型"]}`;
+    : `只输出 JSON，不要 Markdown、HTML 标签或解释：
+{"title":"内容标题","body":"可直接编辑的完整正文","sources":["用户已提供的来源名称"]}`;
 
-  return `请为“期市内容引擎”生成中文期货市场内容。\n\n内容类型：${contentType}\n具体场景：${subtype || '未指定'}\n选题：${topic || '未指定，请根据生成指令拟定'}\n生成指令：${instruction || '请围绕选题生成专业、克制、可供人工编辑的内容。'}\n\n硬性要求：\n1. 只能基于用户提供的信息写作；没有事实或数据支撑时，使用条件性、待核验表述，绝不杜撰新闻、数据、机构观点、日期或来源。\n2. 不提供买卖指令、收益承诺或确定性价格预测；涉及市场判断时明确不确定性。\n3. 语言专业、清晰，保留人工复核空间。\n4. ${contentType === 'Push' ? '每条正文控制在 35—55 个汉字左右，并以“投资有风险，入市需谨慎”收尾。' : '正文应包含必要的风险提示；内容仅供信息分享，不构成投资建议。'}\n\n${format}`;
+  return `请为“期市内容引擎”生成中文期货市场内容。\n\n内容类型：${contentType}\n具体场景：${subtype || '未指定'}\n选题：${topic || '未指定，请根据生成指令拟定'}\n生成指令：${instruction || '请围绕选题生成专业、克制、可供人工编辑的内容。'}\n\n硬性要求：\n1. 只能基于用户提供的信息写作；没有事实或数据支撑时，使用条件性、待核验表述，绝不杜撰新闻、数据、机构观点、日期或来源。\n2. 不提供买卖指令、收益承诺或确定性价格预测；涉及市场判断时明确不确定性。\n3. 正文必须是纯文本，不得输出 <p>、<h2>、<ul>、** 或 # 等 HTML/Markdown 标记；用自然段和中文小标题组织内容。\n4. 资料来源只能填写用户明确提供的来源名称；没有明确来源时返回空数组，绝不杜撰来源、链接或日期。\n5. ${contentType === 'Push' ? '每条正文控制在 35—55 个汉字左右，并以“投资有风险，入市需谨慎”收尾。' : '不要在正文中再写风险提示；系统会按内容类型统一追加固定风险提示。'}\n\n${format}`;
 }
 
 module.exports = async (req, res) => {
@@ -103,7 +103,6 @@ module.exports = async (req, res) => {
     const generated = {
       title: cleanText(result.title, 200) || topic || '期市内容初稿',
       body: cleanText(result.body, 12000),
-      riskNote: cleanText(result.riskNote, 1200),
       sources: Array.isArray(result.sources) ? result.sources.map((item) => cleanText(item, 200)).filter(Boolean).slice(0, 5) : [],
     };
     if (!generated.body) return send(res, 502, { error: 'MINIMAX_INVALID_RESPONSE' });
