@@ -1,4 +1,4 @@
-const { currentProfile, send } = require('./_supabase');
+const { currentProfile, send, supabase } = require('./_supabase');
 
 // 与 AI Studio 共用同一套 Vercel MiniMax 环境变量。模型只负责把已抓取、
 // 已聚类的事实整理为标题和解读；不得补造来源、数据或市场结论。
@@ -57,7 +57,11 @@ function pickItems(payload) { return allArrays(payload).sort((a, b) => b.length 
 function text(value) { return String(value == null ? '' : value).replace(/\s+/g, ' ').trim(); }
 function normalizeDate(value) {
   const raw = text(value); if (!raw) return '';
-  const date = new Date(raw.replace(/年|月/g, '-').replace(/日/g, '').replace(/\//g, '-'));
+  const cleaned = raw.replace(/年|月/g, '-').replace(/日/g, '').replace(/\//g, '-');
+  const local = cleaned.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)$/);
+  // OmniData's pub_time values are usually China-local timestamps without an
+  // offset. Vercel runs in UTC, so make the intended zone explicit.
+  const date = new Date(local ? `${local[1]}T${local[2]}+08:00` : cleaned);
   return Number.isNaN(date.getTime()) ? raw : date.toISOString();
 }
 function classify(value) { return (CATEGORY_RULES.find(([, rule]) => rule.test(value)) || ['宏观'])[0]; }
@@ -74,7 +78,7 @@ function normalizeItem(item, source, index) {
     id: `${source.spider}:${item?.id || item?.code || index}`, title, summary,
     sourceUrl: text(item?.url || item?.link || item?.news_url || item?.newsUrl || item?.href),
     source: text(item?.source || item?.media || item?.publisher || item?.platform || source.label || source.spider),
-    publishedAt: normalizeDate(item?.publish_time || item?.publishTime || item?.published_at || item?.time || item?.datetime || item?.date),
+    publishedAt: normalizeDate(item?.pub_time || item?.publish_time || item?.publishTime || item?.published_at || item?.time || item?.datetime || item?.date),
     grade: source.grade, category: classify(content), contracts: contractsFor(content),
   };
 }
@@ -180,34 +184,59 @@ async function listRegisteredSpiders(baseUrl, headers) {
   }
 }
 
+const VERIFIED_LABELS = {
+  yicai_quick_news: '第一财经', sina_finance_news: '新浪财经',
+  hexun_global_news: '和讯', futunn_flash_news: '富途牛牛',
+  wallstreetcn_global_news: '华尔街见闻', jin10_flash_news: '金十数据',
+  fortune_flash_news: 'Fortune', marketwatch_flash_news: 'MarketWatch',
+  '21jingji_quick_news': '21 财经', ths_10jqka_global_news: '同花顺',
+  jrj_news_flash: '金融界',
+};
+
 module.exports = async (req, res) => {
   if (req.method !== 'GET') return send(res, 405, { error: 'METHOD_NOT_ALLOWED' });
+  res.setHeader('Cache-Control', 'private, no-store');
   try {
     await currentProfile(req);
-    const baseUrl = (process.env.OMNIDATA_BASE_URL || '').replace(/\/$/, ''), apiToken = (process.env.OMNIDATA_API_TOKEN || '').trim();
-    if (!baseUrl || !apiToken) return send(res, 503, { error: 'OMNIDATA_NOT_CONFIGURED' });
-    const { sources, configured, configError } = parseSources();
-    const headers = { 'Content-Type': 'application/json', 'x-omnidata-token': apiToken };
-    // Read OmniData's registry first. A configured source that no longer exists is
-    // reported explicitly instead of silently producing an empty hotspot pool.
-    const catalog = await listRegisteredSpiders(baseUrl, headers);
-    if (catalog) console.info('OmniData registered spiders', catalog.map((spider) => ({ name: spider.name, platform: spider.platform, description: spider.description })));
-    const registeredNames = catalog ? new Set(catalog.map((spider) => spider.name)) : null;
-    const runnable = registeredNames ? sources.filter((source) => registeredNames.has(source.spider)) : sources;
-    const missing = registeredNames ? sources.filter((source) => !registeredNames.has(source.spider)).map((source) => ({ source, ok: false, reason: '该爬虫未在当前 OmniData 服务中注册' })) : [];
-    const results = [...await Promise.all(runnable.map((source) => runSource(baseUrl, headers, source))), ...missing];
-    const collected = results.flatMap((result) => result.ok ? result.items.map((item, index) => normalizeItem(item, result.source, index)).filter(Boolean) : []);
+    // The ECS pushes its completed snapshot to Supabase. A browser refresh only
+    // reads this saved copy; it never contacts the ECS or starts a spider.
+    const snapshots = await supabase('/rest/v1/omnidata_news_snapshots?select=payload,updated_at&id=eq.current&limit=1');
+    const feed = Array.isArray(snapshots) ? snapshots[0]?.payload?.data : null;
+    if (!feed || !Array.isArray(feed.items)) return send(res, 503, { error: 'OMNIDATA_CACHE_EMPTY' });
+    const collected = feed.items.map((entry, index) => normalizeItem(
+      entry.item,
+      { spider: entry.source, label: VERIFIED_LABELS[entry.source] || entry.source, grade: 'B类·已核验' },
+      index,
+    )).filter(Boolean);
     const clustered = clusterItems(collected);
-    const ai = await summarizeHotspotsWithMiniMax(clustered);
+    const statuses = (Array.isArray(feed.sourceStatus) ? feed.sourceStatus : []).map((row) => ({
+      spider: row.source, label: VERIFIED_LABELS[row.source] || row.source,
+      ok: Boolean(row.lastSuccessAt) && !row.lastError,
+      count: row.lastError ? 0 : row.lastCount || 0,
+      checkedAt: row.lastAttemptAt,
+      reason: row.lastError || undefined,
+    }));
+    const refreshedMs = Date.parse(feed.refreshedAt || '');
+    const stale = !Number.isFinite(refreshedMs) || Date.now() - refreshedMs > 35 * 60 * 1000;
+    const sameShanghaiDate = Number.isFinite(refreshedMs) &&
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(refreshedMs) ===
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now());
     return send(res, 200, {
-      items: ai.items, refreshedAt: new Date().toISOString(), source: configured ? `已配置 ${sources.length} 个信源` : '默认信源配置',
-      pipeline: { collected: collected.length, clustered: clustered.length, sourcesRequested: sources.length, sourcesSucceeded: results.filter((result) => result.ok).length, registeredSpiderCount: catalog?.length ?? null, configured, configError: Boolean(configError) },
-      ai: { status: ai.status, model: ai.model || null },
-      sourceStatus: results.map((result) => ({ spider: result.source.spider, label: result.source.label || result.source.spider, ok: result.ok, count: result.ok ? result.items.length : 0, reason: result.ok ? undefined : result.reason })),
+      items: clustered, refreshedAt: feed.refreshedAt,
+      stale, tradingDate: Boolean(feed.tradingDate && sameShanghaiDate),
+      source: `服务器缓存：${Object.keys(VERIFIED_LABELS).length} 个已验证信源`,
+      pipeline: {
+        collected: collected.length, clustered: clustered.length,
+        sourcesRequested: Object.keys(VERIFIED_LABELS).length,
+        sourcesSucceeded: statuses.filter((status) => status.ok).length,
+        configured: true,
+      },
+      ai: { status: 'SKIPPED_CACHED_FEED', model: null },
+      sourceStatus: statuses,
     });
   } catch (error) {
     if (error.message === 'UNAUTHORIZED') return send(res, 401, { error: 'UNAUTHORIZED' });
-    console.error('Market hotspot pipeline failed', error);
-    return send(res, 500, { error: 'MARKET_HOTSPOTS_UNAVAILABLE' });
+    console.error('Market hotspot cache read failed', error.name);
+    return send(res, 502, { error: 'OMNIDATA_CACHE_UNAVAILABLE' });
   }
 };

@@ -21,6 +21,16 @@
     };
   }
 
+  function showSavedNews() {
+    // The button only reads the snapshot through our Vercel API; it never
+    // starts an OmniData collection job.
+    document.getElementById('refreshHotspots')?.click();
+  }
+
+  // Do not display the hard-coded demo cards while real data is loading.
+  renderHotspotItems([]);
+  document.getElementById('lastRefresh').textContent = '等待读取服务器资讯';
+
   updateLoginUi = function updateLoginUiWithServerSession() {
     legacyUpdate();
     const menu = document.querySelector('.nav-user .user-menu');
@@ -43,6 +53,7 @@
       const { profile } = await response.json();
       currentAccount = asAccount(profile);
       updateLoginUi();
+      showSavedNews();
     } catch (_) {
       localStorage.removeItem(tokenKey);
       currentAccount = null;
@@ -74,6 +85,7 @@
       passwordInput.value = '';
       updateLoginUi();
       toast(`欢迎登录，${currentAccount.chineseName || currentAccount.name}`);
+      showSavedNews();
     } catch (error) {
       loginError.textContent = error.message === 'SUPABASE_KEY_REJECTED'
         ? '登录服务暂不可用，请联系开发者。'
