@@ -24,6 +24,25 @@ test('admission rejects unrelated stock stories and generic headlines', () => {
   assert.ok(make('中信建投：油价或维持区间波动', 3));
 });
 
+test('long spider titles become core headlines while the complete source text stays below', () => {
+  const full = '【德国央行：德国仍将是欧洲的稳定支柱】德国央行行长约阿希姆·纳格尔周五在曼谷表示，在债券市场动荡背景下，德国仍会是欧洲的稳定支柱。历经多年经济停滞，德国正恢复元气。';
+  const row = make(full, 4, { content: '' });
+  assert.equal(row.title, '德国央行：德国仍将是欧洲的稳定支柱');
+  assert.equal(row.summary, full);
+  const hotspot = clusterItems([row])[0];
+  assert.equal(hotspot.title, row.title);
+  assert.equal(hotspot.summary, full);
+  assert.equal(hotspot.sources[0].title, full);
+  assert.equal(make('中信建投：油价或维持区间波动', 5).title, '中信建投：油价或维持区间波动');
+});
+
+test('long unbracketed title uses its first fact sentence and keeps the remaining context', () => {
+  const full = '国际原油期货价格周五上涨。交易员仍在评估主要产油国的供给变化，以及后续库存数据可能带来的影响。';
+  const row = make(full, 6, { content: '' });
+  assert.equal(row.title, '国际原油期货价格周五上涨');
+  assert.equal(row.summary, full);
+});
+
 test('duplicate Chinese headlines merge, preserve original links, and sort by calculated score', () => {
   const rows = [
     make('中信建投：油价或维持区间波动', 1),

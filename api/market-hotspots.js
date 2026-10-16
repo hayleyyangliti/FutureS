@@ -72,13 +72,30 @@ function contractsFor(value) {
   const names = ['黄金', '白银', '沪铜', '沪铝', '原油', '燃料油', '沥青', '螺纹钢', '铁矿石', '焦煤', '焦炭', '豆粕', '豆油', '玉米', '棉花', '白糖', '生猪', '甲醇', 'PTA', '橡胶', '碳酸锂', '国债', '股指'];
   return names.filter((name) => value.includes(name.replace(/^沪/, ''))).slice(0, 4);
 }
+function conciseHeadline(value) {
+  const raw = text(value);
+  // Many spiders put a short editor headline in 【】 and append the article body.
+  const bracketed = raw.match(/^【([^】]{6,70})】/);
+  if (bracketed) return conciseHeadline(bracketed[1]);
+  const firstSentence = raw.split(/[。！？!?\n]/, 1)[0].trim();
+  if (firstSentence !== raw && Array.from(firstSentence).length >= 10 && Array.from(firstSentence).length <= 52) return firstSentence;
+  if (Array.from(raw).length <= 52) return raw;
+  if (Array.from(firstSentence).length <= 52) return firstSentence;
+  const clauses = firstSentence.split(/[，,；;]/);
+  if (Array.from(clauses[0]).length >= 12 && Array.from(clauses[0]).length <= 52) return clauses[0].trim();
+  return `${Array.from(firstSentence).slice(0, 48).join('').trim()}…`;
+}
 function normalizeItem(item, source, index) {
-  const title = text(item?.title || item?.news_title || item?.newsTitle || item?.name || item?.content).slice(0, 200);
-  const summary = text(item?.summary || item?.digest || item?.description || item?.content || title).slice(0, 900);
+  const originalTitle = text(item?.title || item?.news_title || item?.newsTitle || item?.name || item?.content).slice(0, 900);
+  const title = conciseHeadline(originalTitle);
+  const sourceSummary = text(item?.summary || item?.digest || item?.description || item?.content);
+  // Preserve the long original title as the expandable excerpt when it carries
+  // more detail than the source's separate summary/content field.
+  const summary = (originalTitle.length > 52 && originalTitle.length > sourceSummary.length ? originalTitle : sourceSummary || originalTitle).slice(0, 900);
   if (!title || title.length < 6 || GENERIC_HEADLINE.test(title) || (!FUTURES_TERMS.test(title) && !MACRO_HEADLINE_TERMS.test(title))) return null;
   const content = `${title} ${summary}`;
   return {
-    id: `${source.spider}:${item?.id || item?.code || index}`, title, summary,
+    id: `${source.spider}:${item?.id || item?.code || index}`, title, originalTitle, summary,
     sourceUrl: text(item?.url || item?.link || item?.news_url || item?.newsUrl || item?.article_url || item?.source_url || item?.sourceUrl || item?.href),
     source: text(item?.source || item?.media || item?.publisher || item?.platform || source.label || source.spider),
     publishedAt: normalizeDate(item?.pub_time || item?.publish_time || item?.publishTime || item?.published_at || item?.publishedAt || item?.time || item?.datetime || item?.date),
@@ -112,7 +129,7 @@ function clusterItems(items) {
     let cluster = clusters.find((candidate) => sameHotspot(candidate.items[0].title, item.title) || (item.sourceUrl && candidate.items.some((entry) => entry.sourceUrl === item.sourceUrl)));
     if (!cluster) { cluster = { items: [], sources: [] }; clusters.push(cluster); }
     cluster.items.push(item);
-    if (!cluster.sources.some((source) => source.name === item.source && (item.sourceUrl ? source.url === item.sourceUrl : titleKey(source.title) === titleKey(item.title)))) cluster.sources.push({ name: item.source, url: item.sourceUrl, publishedAt: item.publishedAt, grade: item.grade, title: item.title });
+    if (!cluster.sources.some((source) => source.name === item.source && (item.sourceUrl ? source.url === item.sourceUrl : titleKey(source.title) === titleKey(item.originalTitle || item.title)))) cluster.sources.push({ name: item.source, url: item.sourceUrl, publishedAt: item.publishedAt, grade: item.grade, title: item.originalTitle || item.title });
   }
   return clusters.map((cluster, index) => {
     const primary = [...cluster.items].sort((a, b) => Number(b.summary !== b.title) - Number(a.summary !== a.title) || b.summary.length - a.summary.length || Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0))[0];
@@ -122,7 +139,7 @@ function clusterItems(items) {
     return { id: `hotspot-${index + 1}`, title: primary.title, summary: primary.summary, summaryType: primary.summary === primary.title ? 'TITLE_ONLY' : 'SOURCE_EXCERPT', source: primary.source, sourceUrl: primary.sourceUrl, publishedAt: firstPublishedAt, grade, category: primary.category, contracts: primary.contracts, sources: cluster.sources.slice(0, 6), duplicateCount: cluster.items.length - 1, scoring, score: scoring.total };
   }).sort((a, b) => b.score - a.score || Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0)).slice(0, 20);
 }
-function cleanAiText(value, maxLength) { return text(value).replace(/\u0000/g, '').slice(0, maxLength); }
+function cleanAiText(value, maxLength) { return text(value).replace(/^@/g, '').slice(0, maxLength); }
 function parseAiJson(value) {
   const raw = text(value).replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   const start = raw.indexOf('{'), end = raw.lastIndexOf('}');
