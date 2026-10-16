@@ -25,8 +25,10 @@ const CATEGORY_RULES = [
   ['资产配置', /国债|股债|资产配置|风险偏好|美元|汇率/],
   ['宏观', /央行|利率|通胀|CPI|PPI|GDP|非农|货币政策|财政|就业|宏观|经济数据/],
 ];
-const FUTURES_TERMS = /期货|合约|商品|原油|黄金|白银|铜|铝|锌|镍|锡|铅|铁矿|螺纹|焦煤|焦炭|豆[粕油]|玉米|小麦|棉花|白糖|生猪|鸡蛋|甲醇|PTA|橡胶|国债|股指|期权|油脂|锂|碳/;
+const FUTURES_TERMS = /期货|合约|商品|原油|油价|石油|天然气|黄金|白银|铜|铝|锌|镍|锡|铅|铁矿|螺纹|钢材|焦煤|焦炭|豆[粕油]|玉米|小麦|棉花|白糖|生猪|鸡蛋|甲醇|PTA|橡胶|国债|股指|期权|油脂|锂|碳/;
 const IMPORTANT_TERMS = /央行|监管|政策|利率|通胀|CPI|PPI|GDP|非农|地缘|战争|制裁|关税|减产|增产|库存|供给|需求|数据公布|交易所|突发/;
+const MACRO_HEADLINE_TERMS = /央行|美联储|利率|通胀|CPI|PPI|GDP|非农|美元|汇率|关税|欧佩克|OPEC|地缘|战争|制裁|库存|供给|需求|经济数据/;
+const GENERIC_HEADLINE = /^(期货|商品|市场|财经)(热点|快讯|资讯|新闻)(追踪|汇总|速览)?$/;
 
 function parseSources() {
   const raw = (process.env.OMNIDATA_HOTSPOT_SOURCES || '').trim();
@@ -73,14 +75,14 @@ function contractsFor(value) {
 function normalizeItem(item, source, index) {
   const title = text(item?.title || item?.news_title || item?.newsTitle || item?.name || item?.content).slice(0, 200);
   const summary = text(item?.summary || item?.digest || item?.description || item?.content || title).slice(0, 900);
-  if (!title || title.length < 6) return null;
+  if (!title || title.length < 6 || GENERIC_HEADLINE.test(title) || (!FUTURES_TERMS.test(title) && !MACRO_HEADLINE_TERMS.test(title))) return null;
   const content = `${title} ${summary}`;
   return {
     id: `${source.spider}:${item?.id || item?.code || index}`, title, summary,
     sourceUrl: text(item?.url || item?.link || item?.news_url || item?.newsUrl || item?.article_url || item?.source_url || item?.sourceUrl || item?.href),
     source: text(item?.source || item?.media || item?.publisher || item?.platform || source.label || source.spider),
     publishedAt: normalizeDate(item?.pub_time || item?.publish_time || item?.publishTime || item?.published_at || item?.publishedAt || item?.time || item?.datetime || item?.date),
-    grade: source.grade, category: classify(content), contracts: contractsFor(content),
+    grade: source.grade, category: classify(title), contracts: contractsFor(title),
   };
 }
 // \W is ASCII-only in JavaScript and silently discards Chinese titles.
@@ -101,7 +103,7 @@ function score(primary, sources) {
   const importance = Math.min(45, 16 + (IMPORTANT_TERMS.test(body) ? 14 : 0) + (primary.grade === 'A类信源' ? 8 : 0) + Math.min(7, count * 3));
   const timeliness = age == null ? 10 : age <= 15 ? 25 : age <= 60 ? 22 : age <= 240 ? 18 : age <= 720 ? 13 : age <= 1440 ? 9 : 5;
   const informationGain = Math.min(20, 8 + Math.min(8, count * 4) + (primary.summary.length > 120 ? 4 : 0));
-  const futuresRelevance = Math.min(10, (FUTURES_TERMS.test(body) ? 7 : 2) + Math.min(3, primary.contracts.length));
+  const futuresRelevance = Math.min(10, (FUTURES_TERMS.test(primary.title) ? 7 : 4) + Math.min(3, primary.contracts.length));
   return { importance, timeliness, informationGain, futuresRelevance, total: importance + timeliness + informationGain + futuresRelevance };
 }
 function clusterItems(items) {

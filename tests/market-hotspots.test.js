@@ -18,6 +18,12 @@ test('Chinese punctuation and full-width characters normalize without losing the
   assert.equal(sameHotspot('中信建投：油价或维持区间波动', '中信建投：铜价或维持区间波动'), false);
 });
 
+test('admission rejects unrelated stock stories and generic headlines', () => {
+  assert.equal(make('中信证券：关注HDD、DRAM、NAND赛道的投资机会', 1, { content: '原油价格波动也受到关注。' }), null);
+  assert.equal(make('期货热点追踪', 2), null);
+  assert.ok(make('中信建投：油价或维持区间波动', 3));
+});
+
 test('duplicate Chinese headlines merge, preserve original links, and sort by calculated score', () => {
   const rows = [
     make('中信建投：油价或维持区间波动', 1),
