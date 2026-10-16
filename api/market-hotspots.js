@@ -105,15 +105,27 @@ function normalizeItem(item, source, index) {
 }
 // \W is ASCII-only in JavaScript and silently discards Chinese titles.
 function titleKey(value) { return text(value).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '').slice(0, 120); }
+function pairOverlap(a, b) {
+  const pairs = (value) => { const chars = Array.from(value); return new Set(chars.slice(1).map((char, index) => chars[index] + char)); };
+  const left = pairs(a), right = pairs(b);
+  return [...left].filter((pair) => right.has(pair)).length / Math.max(left.size, right.size, 1);
+}
 function sameHotspot(left, right) {
   const a = titleKey(left), b = titleKey(right); if (!a || !b) return false;
   if (a === b) return true;
   // Require a substantial shared run: short generic titles must not merge.
-  if (Math.min(a.length, b.length) >= 12 && (a.includes(b) || b.includes(a))) return true;
-  const pairs = (value) => { const chars = Array.from(value); return new Set(chars.slice(1).map((char, index) => chars[index] + char)); };
-  const leftPairs = pairs(a), rightPairs = pairs(b);
-  const intersection = [...leftPairs].filter((pair) => rightPairs.has(pair)).length;
-  return Math.min(a.length, b.length) >= 14 && intersection / Math.max(leftPairs.size, rightPairs.size) >= 0.86;
+  if (Math.min(a.length, b.length) >= 12 && Math.min(a.length, b.length) / Math.max(a.length, b.length) >= 0.5 && (a.includes(b) || b.includes(a))) return true;
+  if (Math.min(a.length, b.length) < 14) return false;
+  // Headlines from the same speech often share a long attribution before “：”,
+  // then quote different points from that one event.
+  const leadA = titleKey(text(left).split(/[：:]/, 1)[0]);
+  const leadB = titleKey(text(right).split(/[：:]/, 1)[0]);
+  if (Math.min(leadA.length, leadB.length) >= 14 && pairOverlap(leadA, leadB) >= 0.8) return true;
+  return pairOverlap(a, b) >= 0.5;
+}
+function sameEventWindow(left, right) {
+  const a = Date.parse(left.publishedAt || ''), b = Date.parse(right.publishedAt || '');
+  return !Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a - b) <= 24 * 60 * 60 * 1000;
 }
 function ageMinutes(value) { const date = new Date(value); return !value || Number.isNaN(date.getTime()) ? null : Math.max(0, (Date.now() - date.getTime()) / 60000); }
 function evidenceKey(item) {
@@ -145,7 +157,7 @@ function score(primary, sources) {
 function clusterItems(items) {
   const clusters = [];
   for (const item of items) {
-    let cluster = clusters.find((candidate) => sameHotspot(candidate.items[0].title, item.title) || (item.sourceUrl && candidate.items.some((entry) => entry.sourceUrl === item.sourceUrl)));
+    let cluster = clusters.find((candidate) => candidate.items.some((entry) => (sameHotspot(entry.title, item.title) && sameEventWindow(entry, item)) || (item.sourceUrl && entry.sourceUrl === item.sourceUrl)));
     if (!cluster) { cluster = { items: [] }; clusters.push(cluster); }
     cluster.items.push(item);
   }
@@ -154,13 +166,15 @@ function clusterItems(items) {
     for (const item of [...cluster.items].sort((a, b) => Date.parse(a.publishedAt || 0) - Date.parse(b.publishedAt || 0))) {
       if (!distinct.some((entry) => sameEvidence(entry, item))) distinct.push(item);
     }
-    const sources = distinct.map((item) => ({ name: item.source, url: item.sourceUrl, publishedAt: item.publishedAt, grade: item.grade, title: item.title }));
+    const sources = distinct.filter((item, position) => distinct.findIndex((entry) => entry.source === item.source) === position).map((item) => ({ name: item.source, url: item.sourceUrl, publishedAt: item.publishedAt, grade: item.grade, title: item.title })).slice(0, 5);
+    // Do not invent or repeat a source merely to satisfy the minimum.
+    if (sources.length < 2) return null;
     const primary = [...cluster.items].sort((a, b) => Number(b.summary !== b.title) - Number(a.summary !== a.title) || b.summary.length - a.summary.length || Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0))[0];
     const firstPublishedAt = cluster.items.map((item) => item.publishedAt).filter((value) => Number.isFinite(Date.parse(value))).sort()[0] || primary.publishedAt;
     const grade = sources.some((source) => source.grade === 'A类信源') ? 'A类信源' : 'B类·已核验';
     const scoring = score({ ...primary, publishedAt: firstPublishedAt, grade }, sources);
-    return { id: `hotspot-${index + 1}`, title: primary.title, summary: primary.summary, summaryType: primary.summary === primary.title ? 'TITLE_ONLY' : 'SOURCE_EXCERPT', source: primary.source, sourceUrl: primary.sourceUrl, publishedAt: firstPublishedAt, grade, category: primary.category, contracts: primary.contracts, sources: sources.slice(0, 6), duplicateCount: cluster.items.length - distinct.length, scoring, score: scoring.total };
-  }).sort((a, b) => b.score - a.score || Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0)).slice(0, 20);
+    return { id: `hotspot-${index + 1}`, title: primary.title, summary: primary.summary, summaryType: primary.summary === primary.title ? 'TITLE_ONLY' : 'SOURCE_EXCERPT', source: primary.source, sourceUrl: primary.sourceUrl, publishedAt: firstPublishedAt, grade, category: primary.category, contracts: primary.contracts, sources, duplicateCount: cluster.items.length - distinct.length, scoring, score: scoring.total };
+  }).filter(Boolean).sort((a, b) => b.score - a.score || Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0)).slice(0, 20);
 }
 function cleanAiText(value, maxLength) { return text(value).replace(/^@/g, '').slice(0, maxLength); }
 function parseAiJson(value) {
@@ -288,6 +302,7 @@ module.exports = async (req, res) => {
       source: `服务器缓存：${Object.keys(VERIFIED_LABELS).length} 个已验证信源`,
       pipeline: {
         collected: collected.length, rejected: feed.items.length - collected.length, clustered: clustered.length,
+        minSources: 2, maxSources: 5,
         sourcesRequested: Object.keys(VERIFIED_LABELS).length,
         sourcesSucceeded: statuses.filter((status) => status.ok).length,
         configured: true,

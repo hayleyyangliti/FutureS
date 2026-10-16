@@ -4,6 +4,7 @@ const { normalizeItem, titleKey, sameHotspot, sameEvidence, clusterItems } = req
 const handler = require('../api/market-hotspots');
 
 const media = { spider: 'yicai_quick_news', label: '第一财经', grade: 'B类·已核验' };
+const otherMedia = { spider: 'sina_finance_news', label: '新浪财经', grade: 'B类·已核验' };
 const make = (title, index, overrides = {}) => normalizeItem({
   title,
   content: `${title}，机构观点仍需结合后续库存数据核验。`,
@@ -16,6 +17,9 @@ test('Chinese punctuation and full-width characters normalize without losing the
   assert.equal(titleKey('中信建投：油价或维持区间波动'), titleKey('中信建投: 油价或维持区间波动'));
   assert.equal(sameHotspot('中信建投：油价或维持区间波动', '中信建投: 油价或维持区间波动'), true);
   assert.equal(sameHotspot('中信建投：油价或维持区间波动', '中信建投：铜价或维持区间波动'), false);
+  const speech = '日本央行行长植田和男（由副行长内田真一代读演讲稿）：';
+  assert.equal(sameHotspot(`${speech}成本上升的影响已开始显现在消费价格上`, `${speech}经济、价格与我们的基线预测一致`), true);
+  assert.equal(sameHotspot(`${speech}成本上升的影响已开始显现在消费价格上`, '美国央行官员表示将继续关注通胀和就业数据'), false);
 });
 
 test('admission rejects unrelated stock stories and generic headlines', () => {
@@ -30,7 +34,8 @@ test('long spider titles become core headlines while the complete source text st
   const row = make(full, 4, { content: '' });
   assert.equal(row.title, '德国央行：德国仍将是欧洲的稳定支柱');
   assert.equal(row.summary, full);
-  const hotspot = clusterItems([row])[0];
+  const extra = normalizeItem({ title: row.title, content: '另一报道补充指出德国央行将继续关注欧洲债券市场的变化，同时评估通胀回落、经济增长和后续货币政策路径。', pub_time: '2026-10-16 10:32:00', url: 'https://example.com/extra' }, otherMedia, 5);
+  const hotspot = clusterItems([row, extra])[0];
   assert.equal(hotspot.title, row.title);
   assert.equal(hotspot.summary, full);
   assert.equal(hotspot.sources[0].title, row.title);
@@ -46,15 +51,17 @@ test('long unbracketed title uses its first fact sentence and keeps the remainin
 
 test('duplicate Chinese headlines merge without creating extra corroboration', () => {
   const rows = [
-    make('中信建投：油价或维持区间波动', 1),
-    make('中信建投: 油价或维持区间波动', 2, { pub_time: '2026-10-16 10:33:00' }),
-    make('国内玉米现货价格小幅波动', 3),
+    make('中信建投：油价或维持区间波动', 1, { content: '中信建投预计油价或维持区间波动，机构正在关注海外产油国供给政策和库存变化。' }),
+    make('中信建投: 油价或维持区间波动', 2, { content: '中信建投预计油价或维持区间波动，机构正在关注海外产油国供给政策和库存变化。', pub_time: '2026-10-16 10:33:00' }),
+    normalizeItem({ title: '中信建投：油价或维持区间波动', content: '另一媒体采访炼厂指出，现货需求疲弱且库存上升，市场仍在等待产油国下一次政策会议的结果。', pub_time: '2026-10-16 10:35:00', url: 'https://example.com/other-oil' }, otherMedia, 3),
+    make('国内玉米现货价格小幅波动', 4, { content: '国内玉米现货价格小幅波动，贸易商正观察主产区新粮上市和下游采购节奏。' }),
+    normalizeItem({ title: '国内玉米现货价格小幅波动', content: '另一份玉米现货市场调查显示主产区报价略有调整，贸易商仍在观察新粮上市进度和下游采购节奏。', pub_time: '2026-10-16 10:36:00', url: 'https://example.com/other-corn' }, otherMedia, 5),
   ];
   const result = clusterItems(rows);
   assert.equal(result.length, 2);
   const oil = result.find((item) => item.title.includes('油价'));
   assert.equal(oil.duplicateCount, 1);
-  assert.equal(oil.sources.length, 1);
+  assert.equal(oil.sources.length, 2);
   assert.equal(oil.sources[0].url, 'https://example.com/1');
   assert.equal(oil.publishedAt, '2026-10-16T02:30:00.000Z');
   assert.equal(oil.grade, 'B类·已核验');
@@ -66,18 +73,30 @@ test('five syndicated copies count as one report, while new facts count separate
   const title = '韩国央行维持基准利率不变';
   const common = '韩国央行宣布维持基准利率不变。声明指出，决策者将继续观察通胀和汇率变化，并在后续会议评估经济增长前景。';
   const copies = ['同花顺', '21财经', '金十数据', '第一财经', '金融界'].map((label, index) => normalizeItem({ title, content: common, url: `https://example.com/wire/${index}`, pub_time: '2026-10-16 14:00:00' }, { spider: `wire${index}`, label, grade: 'B类·已核验' }, index));
-  const one = clusterItems(copies.slice(0, 1))[0], syndicated = clusterItems(copies)[0];
-  assert.equal(syndicated.sources.length, 1);
-  assert.equal(syndicated.duplicateCount, 4);
-  assert.equal(syndicated.scoring.informationGain, one.scoring.informationGain);
-  assert.equal(syndicated.score, one.score);
-  assert.equal(syndicated.sources[0].title, title);
+  assert.equal(clusterItems(copies).length, 0);
   const added = normalizeItem({ title, content: '韩国央行维持基准利率不变。另一份独立报道补充了最新公布的出口数据、家庭债务指标和委员会成员对未来利率路径的不同意见。', url: 'https://example.com/new', pub_time: '2026-10-16 14:05:00' }, { spider: 'other', label: '独立媒体', grade: 'B类·已核验' }, 6);
   assert.equal(sameEvidence(copies[0], added), false);
   const withNewFacts = clusterItems([...copies, added])[0];
   assert.equal(withNewFacts.sources.length, 2);
   assert.equal(withNewFacts.duplicateCount, 4);
-  assert.ok(withNewFacts.scoring.informationGain > syndicated.scoring.informationGain);
+  assert.equal(withNewFacts.sources[0].title, title);
+  assert.equal(withNewFacts.score, clusterItems([copies[0], added])[0].score);
+});
+
+test('similar remarks from one speech form one hotspot with two to five sources', () => {
+  const lead = '日本央行行长植田和男（由副行长内田真一代读演讲稿）：';
+  const remarks = [
+    '成本上升的影响已开始显现在消费价格上',
+    '经济、价格与我们的基线预测一致',
+    '即使在九月份加息后，宽松的金融环境仍继续支持经济活动',
+    '存在潜在通胀超出2%的价格目标的风险',
+  ];
+  const rows = remarks.map((remark, index) => normalizeItem({ title: `${index === 3 ? lead.replace('演讲稿', '讲话稿') : lead}${remark}`, content: `${remark}。第${index + 1}份报道另外给出了不同的政策背景和市场观察，重点涉及经济增长、通胀走势及利率预期。`, pub_time: `2026-10-16 14:3${index}:00`, url: `https://example.com/speech/${index}` }, { spider: `speech${index}`, label: `媒体${index + 1}`, grade: 'B类·已核验' }, index));
+  assert.ok(rows.every(Boolean));
+  assert.equal(clusterItems(rows).length, 1);
+  assert.equal(clusterItems(rows)[0].sources.length, 4);
+  const extra = Array.from({ length: 4 }, (_, index) => ({ ...rows[index], source: `补充媒体${index + 1}`, sourceUrl: `https://example.com/additional/${index}`, summary: `补充媒体第${index + 1}篇报道介绍了另一项政策依据，其中包括与其他报道不同的调查结果和决策过程说明。` }));
+  assert.equal(clusterItems([...rows, ...extra])[0].sources.length, 5);
 });
 
 test('cached feed responds with deduplicated, ranked items and source provenance', async () => {
@@ -89,7 +108,13 @@ test('cached feed responds with deduplicated, ranked items and source provenance
     if (String(url).endsWith('/rpc/current_profile')) return { ok: true, json: async () => [{ auth_user_id: 'test-user' }] };
     return { ok: true, text: async () => JSON.stringify([{ updated_at: new Date().toISOString(), payload: { data: {
       refreshedAt: new Date().toISOString(), tradingDate: true,
-      items: [...[make('中信建投：油价或维持区间波动', 1), make('中信建投: 油价或维持区间波动', 2), make('国内玉米现货价格小幅波动', 3)].map((item) => ({ source: media.spider, item })), { source: 'unverified_spider', item: { title: '未经准入的资讯不得展示' } }],
+      items: [
+        { source: media.spider, item: { title: '中信建投：油价或维持区间波动', content: '中信建投预计油价或维持区间波动，机构正在关注海外产油国供给政策和库存变化。', url: 'https://example.com/oil/1' } },
+        { source: otherMedia.spider, item: { title: '中信建投：油价或维持区间波动', content: '另一媒体报道指出，近期炼厂开工和原油现货采购均有变化，投资者还将关注下一次库存数据。', url: 'https://example.com/oil/2' } },
+        { source: media.spider, item: { title: '国内玉米现货价格小幅波动', content: '国内玉米现货价格小幅波动，贸易商正观察主产区新粮上市和下游采购节奏。', url: 'https://example.com/corn/1' } },
+        { source: otherMedia.spider, item: { title: '国内玉米现货价格小幅波动', content: '另一份现货调查发现不同产区报价存在分化，饲料企业采购计划暂未明显调整。', url: 'https://example.com/corn/2' } },
+        { source: 'unverified_spider', item: { title: '未经准入的资讯不得展示' } },
+      ],
       sourceStatus: [{ source: media.spider, lastSuccessAt: new Date().toISOString(), lastCount: 3 }],
     } } }]) };
   };
@@ -99,7 +124,7 @@ test('cached feed responds with deduplicated, ranked items and source provenance
     assert.equal(response.code, 200);
     assert.equal(response.body.items.length, 2);
     assert.equal(response.body.pipeline.rejected, 1);
-    assert.ok(response.body.items.every((item) => item.score === item.scoring.total && item.sources.length));
+    assert.ok(response.body.items.every((item) => item.score === item.scoring.total && item.sources.length >= 2 && item.sources.length <= 5));
     assert.equal(response.body.ai.status, 'MINIMAX_NOT_CONFIGURED');
   } finally {
     global.fetch = previousFetch;
@@ -116,7 +141,10 @@ test('analysis request enriches only the excerpt, without changing verified head
     if (String(url).endsWith('/rpc/current_profile')) return { ok: true, json: async () => [{ auth_user_id: 'test-user' }] };
     if (String(url).includes('api.minimaxi.com')) return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ items: [{ id: 'hotspot-1', title: '不应覆盖原题', summary: '已采集资讯提供了机构对油价波动区间的观点；其依据和适用时间仍需查验原文，不能将该观点理解为确定的价格预测或交易建议。' }] }) } }] }) };
     return { ok: true, text: async () => JSON.stringify([{ updated_at: snapshot, payload: { data: {
-      refreshedAt: snapshot, items: [{ source: media.spider, item: { title: '中信建投：油价或维持区间波动', content: '中信建投认为油价或维持区间波动。', url: 'https://example.com/original', pub_time: '2026-10-16 10:30:00' } }], sourceStatus: [],
+      refreshedAt: snapshot, items: [
+        { source: media.spider, item: { title: '中信建投：油价或维持区间波动', content: '中信建投认为油价或维持区间波动，相关研究同时讨论了产油国供给变化和全球需求前景。', url: 'https://example.com/original', pub_time: '2026-10-16 10:30:00' } },
+        { source: otherMedia.spider, item: { title: '中信建投：油价或维持区间波动', content: '另一媒体报道产油国政策与现货库存的变化，对未来价格可能产生新的影响。', url: 'https://example.com/second', pub_time: '2026-10-16 10:31:00' } },
+      ], sourceStatus: [],
     } } }]) };
   };
   const response = { status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; }, setHeader() {} };
