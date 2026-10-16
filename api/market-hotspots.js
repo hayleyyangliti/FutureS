@@ -17,7 +17,7 @@ const MAX_SOURCES = 8;
 const MAX_ITEMS_PER_SOURCE = 30;
 const CATEGORY_RULES = [
   ['农产品', /豆[粕油]|玉米|小麦|棉花|白糖|生猪|鸡蛋|苹果|红枣|油脂|粮食|农产/],
-  ['有色及贵金属', /黄金|白银|铜|铝|锌|镍|锡|铅|有色|贵金属|矿/],
+  ['有色及贵金属', /黄金|白银|有色金属|贵金属|沪[铜铝锌镍锡铅]|[铜铝锌镍锡铅](?:价|矿|锭|库存|现货|冶炼|期货|供应|供给|需求|产量)/],
   ['黑色', /螺纹|热卷|铁矿|焦煤|焦炭|钢材|钢铁|煤炭/],
   ['能源化工', /原油|油价|燃料油|沥青|天然气|化工|甲醇|PTA|乙二醇|塑料|橡胶|尿素/],
   ['绿色金融及新能源', /新能源|光伏|锂|碳交易|碳排放|风电|储能/],
@@ -25,9 +25,10 @@ const CATEGORY_RULES = [
   ['资产配置', /国债|股债|资产配置|风险偏好|美元|汇率/],
   ['宏观', /央行|利率|通胀|CPI|PPI|GDP|非农|货币政策|财政|就业|宏观|经济数据/],
 ];
-const FUTURES_TERMS = /期货|合约|商品|原油|油价|石油|天然气|黄金|白银|铜|铝|锌|镍|锡|铅|铁矿|螺纹|钢材|焦煤|焦炭|豆[粕油]|玉米|小麦|棉花|白糖|生猪|鸡蛋|甲醇|PTA|橡胶|国债|股指|期权|油脂|锂|碳/;
-const IMPORTANT_TERMS = /央行|监管|政策|利率|通胀|CPI|PPI|GDP|非农|地缘|战争|制裁|关税|减产|增产|库存|供给|需求|数据公布|交易所|突发/;
-const MACRO_HEADLINE_TERMS = /央行|美联储|利率|通胀|CPI|PPI|GDP|非农|美元|汇率|关税|欧佩克|OPEC|地缘|战争|制裁|库存|供给|需求|经济数据/;
+// Single metal characters match people's names (e.g. 尹锡悦), so require market context.
+const FUTURES_TERMS = /期货|期权|大宗商品|商品(?:价格|期货|市场)|原油|油价|石油|天然气|黄金|白银|有色金属|贵金属|沪[铜铝锌镍锡铅]|[铜铝锌镍锡铅](?:价|矿|锭|库存|现货|冶炼|期货|供应|供给|需求|产量)|铁矿|螺纹|钢材|焦煤|焦炭|豆[粕油]|玉米|小麦|棉花|白糖|生猪|鸡蛋|甲醇|PTA|橡胶|国债|股指|油脂|碳酸锂|碳交易|碳排放/;
+const IMPORTANT_TERMS = /央行|美联储|监管|货币政策|财政政策|利率|通胀|CPI|PPI|GDP|非农|关税|减产|增产|库存|交易所|数据公布/;
+const MACRO_HEADLINE_TERMS = /央行|美联储|利率|通胀|CPI|PPI|GDP|非农|美元|汇率|关税|欧佩克|OPEC|经济数据|财政政策|债券市场|收益率/;
 const GENERIC_HEADLINE = /^(期货|商品|市场|财经)(热点|快讯|资讯|新闻)(追踪|汇总|速览)?$/;
 
 function parseSources() {
@@ -115,28 +116,50 @@ function sameHotspot(left, right) {
   return Math.min(a.length, b.length) >= 14 && intersection / Math.max(leftPairs.size, rightPairs.size) >= 0.86;
 }
 function ageMinutes(value) { const date = new Date(value); return !value || Number.isNaN(date.getTime()) ? null : Math.max(0, (Date.now() - date.getTime()) / 60000); }
+function evidenceKey(item) {
+  return text(item.summary || item.originalTitle || item.title).replace(/^【[^】]*】/, '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '').slice(0, 700);
+}
+function sameEvidence(left, right) {
+  const a = evidenceKey(left), b = evidenceKey(right);
+  if (a === b) return true;
+  // A headline-only copy cannot provide a second independent account.
+  if (Math.min(a.length, b.length) < 30) return sameHotspot(left.title, right.title);
+  const shorter = a.length < b.length ? a : b, longer = a.length < b.length ? b : a;
+  if (longer.includes(shorter) && shorter.length / longer.length >= 0.75) return true;
+  const pairs = (value) => { const chars = Array.from(value); return new Set(chars.slice(1).map((char, index) => chars[index] + char)); };
+  const first = pairs(a), second = pairs(b);
+  const shared = [...first].filter((pair) => second.has(pair)).length;
+  return shared / Math.max(first.size, second.size) >= 0.78;
+}
 function score(primary, sources) {
-  const body = `${primary.title} ${primary.summary}`, count = new Set(sources.map((source) => source.name)).size, age = ageMinutes(primary.publishedAt);
-  const importance = Math.min(45, 16 + (IMPORTANT_TERMS.test(body) ? 14 : 0) + (primary.grade === 'A类信源' ? 8 : 0) + Math.min(7, count * 3));
+  const count = new Set(sources.map((source) => source.name)).size, age = ageMinutes(primary.publishedAt);
+  const direct = FUTURES_TERMS.test(primary.title), macro = MACRO_HEADLINE_TERMS.test(primary.title);
+  const importance = Math.min(45, 14 + (IMPORTANT_TERMS.test(primary.title) ? 12 : 0) + (direct ? 8 : macro ? 4 : 0) + (primary.grade === 'A类信源' ? 6 : 0) + Math.min(5, Math.max(0, count - 1) * 3));
   const timeliness = age == null ? 10 : age <= 15 ? 25 : age <= 60 ? 22 : age <= 240 ? 18 : age <= 720 ? 13 : age <= 1440 ? 9 : 5;
-  const informationGain = Math.min(20, 8 + Math.min(8, count * 4) + (primary.summary.length > 120 ? 4 : 0));
-  const futuresRelevance = Math.min(10, (FUTURES_TERMS.test(primary.title) ? 7 : 4) + Math.min(3, primary.contracts.length));
+  // Only distinct content from a different publisher contributes corroboration;
+  // long text and syndicated copies do not create information gain by themselves.
+  const informationGain = Math.min(20, 7 + Math.min(13, Math.max(0, count - 1) * 5));
+  const futuresRelevance = direct ? 10 : macro ? 6 : 0;
   return { importance, timeliness, informationGain, futuresRelevance, total: importance + timeliness + informationGain + futuresRelevance };
 }
 function clusterItems(items) {
   const clusters = [];
   for (const item of items) {
     let cluster = clusters.find((candidate) => sameHotspot(candidate.items[0].title, item.title) || (item.sourceUrl && candidate.items.some((entry) => entry.sourceUrl === item.sourceUrl)));
-    if (!cluster) { cluster = { items: [], sources: [] }; clusters.push(cluster); }
+    if (!cluster) { cluster = { items: [] }; clusters.push(cluster); }
     cluster.items.push(item);
-    if (!cluster.sources.some((source) => source.name === item.source && (item.sourceUrl ? source.url === item.sourceUrl : titleKey(source.title) === titleKey(item.originalTitle || item.title)))) cluster.sources.push({ name: item.source, url: item.sourceUrl, publishedAt: item.publishedAt, grade: item.grade, title: item.originalTitle || item.title });
   }
   return clusters.map((cluster, index) => {
+    const distinct = [];
+    for (const item of [...cluster.items].sort((a, b) => Date.parse(a.publishedAt || 0) - Date.parse(b.publishedAt || 0))) {
+      if (!distinct.some((entry) => sameEvidence(entry, item))) distinct.push(item);
+    }
+    const sources = distinct.map((item) => ({ name: item.source, url: item.sourceUrl, publishedAt: item.publishedAt, grade: item.grade, title: item.title }));
     const primary = [...cluster.items].sort((a, b) => Number(b.summary !== b.title) - Number(a.summary !== a.title) || b.summary.length - a.summary.length || Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0))[0];
     const firstPublishedAt = cluster.items.map((item) => item.publishedAt).filter((value) => Number.isFinite(Date.parse(value))).sort()[0] || primary.publishedAt;
-    const grade = cluster.sources.some((source) => source.grade === 'A类信源') ? 'A类信源' : 'B类·已核验';
-    const scoring = score({ ...primary, publishedAt: firstPublishedAt, grade }, cluster.sources);
-    return { id: `hotspot-${index + 1}`, title: primary.title, summary: primary.summary, summaryType: primary.summary === primary.title ? 'TITLE_ONLY' : 'SOURCE_EXCERPT', source: primary.source, sourceUrl: primary.sourceUrl, publishedAt: firstPublishedAt, grade, category: primary.category, contracts: primary.contracts, sources: cluster.sources.slice(0, 6), duplicateCount: cluster.items.length - 1, scoring, score: scoring.total };
+    const grade = sources.some((source) => source.grade === 'A类信源') ? 'A类信源' : 'B类·已核验';
+    const scoring = score({ ...primary, publishedAt: firstPublishedAt, grade }, sources);
+    return { id: `hotspot-${index + 1}`, title: primary.title, summary: primary.summary, summaryType: primary.summary === primary.title ? 'TITLE_ONLY' : 'SOURCE_EXCERPT', source: primary.source, sourceUrl: primary.sourceUrl, publishedAt: firstPublishedAt, grade, category: primary.category, contracts: primary.contracts, sources: sources.slice(0, 6), duplicateCount: cluster.items.length - distinct.length, scoring, score: scoring.total };
   }).sort((a, b) => b.score - a.score || Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0)).slice(0, 20);
 }
 function cleanAiText(value, maxLength) { return text(value).replace(/^@/g, '').slice(0, maxLength); }
@@ -283,4 +306,4 @@ module.exports = async (req, res) => {
 };
 
 // Pure helpers are exposed for regression tests; this does not create an API route.
-module.exports._test = { normalizeItem, titleKey, sameHotspot, clusterItems, score };
+module.exports._test = { normalizeItem, titleKey, sameHotspot, sameEvidence, clusterItems, score };

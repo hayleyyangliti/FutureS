@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { normalizeItem, titleKey, sameHotspot, clusterItems } = require('../api/market-hotspots')._test;
+const { normalizeItem, titleKey, sameHotspot, sameEvidence, clusterItems } = require('../api/market-hotspots')._test;
 const handler = require('../api/market-hotspots');
 
 const media = { spider: 'yicai_quick_news', label: '第一财经', grade: 'B类·已核验' };
@@ -22,6 +22,7 @@ test('admission rejects unrelated stock stories and generic headlines', () => {
   assert.equal(make('中信证券：关注HDD、DRAM、NAND赛道的投资机会', 1, { content: '原油价格波动也受到关注。' }), null);
   assert.equal(make('期货热点追踪', 2), null);
   assert.ok(make('中信建投：油价或维持区间波动', 3));
+  assert.equal(make('韩国检方要求尹锡悦涉无人机案二审维持30年刑期', 4), null);
 });
 
 test('long spider titles become core headlines while the complete source text stays below', () => {
@@ -32,7 +33,7 @@ test('long spider titles become core headlines while the complete source text st
   const hotspot = clusterItems([row])[0];
   assert.equal(hotspot.title, row.title);
   assert.equal(hotspot.summary, full);
-  assert.equal(hotspot.sources[0].title, full);
+  assert.equal(hotspot.sources[0].title, row.title);
   assert.equal(make('中信建投：油价或维持区间波动', 5).title, '中信建投：油价或维持区间波动');
 });
 
@@ -43,7 +44,7 @@ test('long unbracketed title uses its first fact sentence and keeps the remainin
   assert.equal(row.summary, full);
 });
 
-test('duplicate Chinese headlines merge, preserve original links, and sort by calculated score', () => {
+test('duplicate Chinese headlines merge without creating extra corroboration', () => {
   const rows = [
     make('中信建投：油价或维持区间波动', 1),
     make('中信建投: 油价或维持区间波动', 2, { pub_time: '2026-10-16 10:33:00' }),
@@ -53,11 +54,30 @@ test('duplicate Chinese headlines merge, preserve original links, and sort by ca
   assert.equal(result.length, 2);
   const oil = result.find((item) => item.title.includes('油价'));
   assert.equal(oil.duplicateCount, 1);
-  assert.equal(oil.sources.length, 2);
+  assert.equal(oil.sources.length, 1);
+  assert.equal(oil.sources[0].url, 'https://example.com/1');
   assert.equal(oil.publishedAt, '2026-10-16T02:30:00.000Z');
   assert.equal(oil.grade, 'B类·已核验');
   assert.equal(oil.score, Object.values(oil.scoring).filter((value) => typeof value === 'number').slice(0, 4).reduce((sum, value) => sum + value, 0));
   assert.deepEqual(result.map((item) => item.score), [...result.map((item) => item.score)].sort((a, b) => b - a));
+});
+
+test('five syndicated copies count as one report, while new facts count separately', () => {
+  const title = '韩国央行维持基准利率不变';
+  const common = '韩国央行宣布维持基准利率不变。声明指出，决策者将继续观察通胀和汇率变化，并在后续会议评估经济增长前景。';
+  const copies = ['同花顺', '21财经', '金十数据', '第一财经', '金融界'].map((label, index) => normalizeItem({ title, content: common, url: `https://example.com/wire/${index}`, pub_time: '2026-10-16 14:00:00' }, { spider: `wire${index}`, label, grade: 'B类·已核验' }, index));
+  const one = clusterItems(copies.slice(0, 1))[0], syndicated = clusterItems(copies)[0];
+  assert.equal(syndicated.sources.length, 1);
+  assert.equal(syndicated.duplicateCount, 4);
+  assert.equal(syndicated.scoring.informationGain, one.scoring.informationGain);
+  assert.equal(syndicated.score, one.score);
+  assert.equal(syndicated.sources[0].title, title);
+  const added = normalizeItem({ title, content: '韩国央行维持基准利率不变。另一份独立报道补充了最新公布的出口数据、家庭债务指标和委员会成员对未来利率路径的不同意见。', url: 'https://example.com/new', pub_time: '2026-10-16 14:05:00' }, { spider: 'other', label: '独立媒体', grade: 'B类·已核验' }, 6);
+  assert.equal(sameEvidence(copies[0], added), false);
+  const withNewFacts = clusterItems([...copies, added])[0];
+  assert.equal(withNewFacts.sources.length, 2);
+  assert.equal(withNewFacts.duplicateCount, 4);
+  assert.ok(withNewFacts.scoring.informationGain > syndicated.scoring.informationGain);
 });
 
 test('cached feed responds with deduplicated, ranked items and source provenance', async () => {
