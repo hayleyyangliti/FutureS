@@ -73,7 +73,8 @@ test('five syndicated copies count as one report, while new facts count separate
   const title = '韩国央行维持基准利率不变';
   const common = '韩国央行宣布维持基准利率不变。声明指出，决策者将继续观察通胀和汇率变化，并在后续会议评估经济增长前景。';
   const copies = ['同花顺', '21财经', '金十数据', '第一财经', '金融界'].map((label, index) => normalizeItem({ title, content: common, url: `https://example.com/wire/${index}`, pub_time: '2026-10-16 14:00:00' }, { spider: `wire${index}`, label, grade: 'B类·已核验' }, index));
-  assert.equal(clusterItems(copies).length, 0);
+  assert.equal(clusterItems(copies).length, 1);
+  assert.equal(clusterItems(copies)[0].sources.length, 1);
   const added = normalizeItem({ title, content: '韩国央行维持基准利率不变。另一份独立报道补充了最新公布的出口数据、家庭债务指标和委员会成员对未来利率路径的不同意见。', url: 'https://example.com/new', pub_time: '2026-10-16 14:05:00' }, { spider: 'other', label: '独立媒体', grade: 'B类·已核验' }, 6);
   assert.equal(sameEvidence(copies[0], added), false);
   const withNewFacts = clusterItems([...copies, added])[0];
@@ -83,7 +84,7 @@ test('five syndicated copies count as one report, while new facts count separate
   assert.equal(withNewFacts.score, clusterItems([copies[0], added])[0].score);
 });
 
-test('similar remarks from one speech form one hotspot with two to five sources', () => {
+test('similar remarks from one speech form one hotspot with one to three sources', () => {
   const lead = '日本央行行长植田和男（由副行长内田真一代读演讲稿）：';
   const remarks = [
     '成本上升的影响已开始显现在消费价格上',
@@ -94,9 +95,9 @@ test('similar remarks from one speech form one hotspot with two to five sources'
   const rows = remarks.map((remark, index) => normalizeItem({ title: `${index === 3 ? lead.replace('演讲稿', '讲话稿') : lead}${remark}`, content: `${remark}。第${index + 1}份报道另外给出了不同的政策背景和市场观察，重点涉及经济增长、通胀走势及利率预期。`, pub_time: `2026-10-16 14:3${index}:00`, url: `https://example.com/speech/${index}` }, { spider: `speech${index}`, label: `媒体${index + 1}`, grade: 'B类·已核验' }, index));
   assert.ok(rows.every(Boolean));
   assert.equal(clusterItems(rows).length, 1);
-  assert.equal(clusterItems(rows)[0].sources.length, 4);
+  assert.equal(clusterItems(rows)[0].sources.length, 3);
   const extra = Array.from({ length: 4 }, (_, index) => ({ ...rows[index], source: `补充媒体${index + 1}`, sourceUrl: `https://example.com/additional/${index}`, summary: `补充媒体第${index + 1}篇报道介绍了另一项政策依据，其中包括与其他报道不同的调查结果和决策过程说明。` }));
-  assert.equal(clusterItems([...rows, ...extra])[0].sources.length, 5);
+  assert.equal(clusterItems([...rows, ...extra])[0].sources.length, 3);
 });
 
 test('cached feed responds with deduplicated, ranked items and source provenance', async () => {
@@ -124,7 +125,9 @@ test('cached feed responds with deduplicated, ranked items and source provenance
     assert.equal(response.code, 200);
     assert.equal(response.body.items.length, 2);
     assert.equal(response.body.pipeline.rejected, 1);
-    assert.ok(response.body.items.every((item) => item.score === item.scoring.total && item.sources.length >= 2 && item.sources.length <= 5));
+    assert.equal(response.body.pipeline.minSources, 1);
+    assert.equal(response.body.pipeline.maxSources, 3);
+    assert.ok(response.body.items.every((item) => item.score === item.scoring.total && item.sources.length >= 1 && item.sources.length <= 3));
     assert.equal(response.body.ai.status, 'MINIMAX_NOT_CONFIGURED');
   } finally {
     global.fetch = previousFetch;

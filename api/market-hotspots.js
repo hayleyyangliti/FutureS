@@ -166,9 +166,9 @@ function clusterItems(items) {
     for (const item of [...cluster.items].sort((a, b) => Date.parse(a.publishedAt || 0) - Date.parse(b.publishedAt || 0))) {
       if (!distinct.some((entry) => sameEvidence(entry, item))) distinct.push(item);
     }
-    const sources = distinct.filter((item, position) => distinct.findIndex((entry) => entry.source === item.source) === position).map((item) => ({ name: item.source, url: item.sourceUrl, publishedAt: item.publishedAt, grade: item.grade, title: item.title })).slice(0, 5);
-    // Do not invent or repeat a source merely to satisfy the minimum.
-    if (sources.length < 2) return null;
+    const sources = distinct.filter((item, position) => distinct.findIndex((entry) => entry.source === item.source) === position).map((item) => ({ name: item.source, url: item.sourceUrl, publishedAt: item.publishedAt, grade: item.grade, title: item.title })).slice(0, 3);
+    // Keep single-source events visible while still excluding repeated copies.
+    if (!sources.length) return null;
     const primary = [...cluster.items].sort((a, b) => Number(b.summary !== b.title) - Number(a.summary !== a.title) || b.summary.length - a.summary.length || Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0))[0];
     const firstPublishedAt = cluster.items.map((item) => item.publishedAt).filter((value) => Number.isFinite(Date.parse(value))).sort()[0] || primary.publishedAt;
     const grade = sources.some((source) => source.grade === 'A类信源') ? 'A类信源' : 'B类·已核验';
@@ -302,7 +302,7 @@ module.exports = async (req, res) => {
       source: `服务器缓存：${Object.keys(VERIFIED_LABELS).length} 个已验证信源`,
       pipeline: {
         collected: collected.length, rejected: feed.items.length - collected.length, clustered: clustered.length,
-        minSources: 2, maxSources: 5,
+        minSources: 1, maxSources: 3,
         sourcesRequested: Object.keys(VERIFIED_LABELS).length,
         sourcesSucceeded: statuses.filter((status) => status.ok).length,
         configured: true,
