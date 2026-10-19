@@ -1,10 +1,11 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, sameEvidence, clusterItems } = require('../api/market-hotspots')._test;
+const { normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, sameEvidence, clusterItems } = require('../api/market-hotspots')._test;
 const handler = require('../api/market-hotspots');
 
 const media = { spider: 'yicai_quick_news', label: '第一财经', grade: 'B类·已核验' };
 const otherMedia = { spider: 'sina_finance_news', label: '新浪财经', grade: 'B类·已核验' };
+const longArticle = (content) => `${content}相关机构还说明了政策背景、已披露的数据口径和后续核验时间，报道分别列出供给、需求及库存变化，提醒读者以正式公告和原始数据为准，避免将单日市场波动直接理解为长期趋势。报道进一步解释了统计范围、样本差异、历史对比和潜在限制，相关结论需要结合后续官方披露持续核实。`;
 const make = (title, index, overrides = {}) => normalizeItem({
   title,
   content: `${title}，机构观点仍需结合后续库存数据核验。`,
@@ -56,9 +57,21 @@ test('market price moves and opening-session headlines are not admitted as news'
   assert.equal(make('国债期货开盘', 13), null);
   assert.equal(make('国债期货开盘多数上涨', 8), null);
   assert.equal(make('沪铜主力合约盘中拉升', 9), null);
+  assert.equal(isMarketTape('贵金属板块异动拉升，赤峰黄金涨超5%'), true);
+  assert.equal(isMarketTape('贵金属板块持续走高'), true);
+  assert.equal(isMarketTape('贵金属板块持续走高，赤峰黄金'), true);
+  assert.equal(make('贵金属板块异动拉升，赤峰黄金涨超5%', 15), null);
   assert.ok(make('欧佩克宣布调整原油产量计划', 10));
   assert.ok(make('欧佩克宣布减产推动油价上涨', 14));
   assert.ok(make('日本央行行长植田和男：将根据经济形势调整货币政策', 11));
+});
+
+test('only source text with at least 130 substantive characters enters the hotspot pool', () => {
+  assert.equal(articleCharacterCount({ title: '黄金', content: ` <p>${'中'.repeat(129)}</p> ` }), 129);
+  assert.equal(qualifiesArticleLength({ title: '黄金', content: '中'.repeat(129) }), false);
+  assert.equal(qualifiesArticleLength({ title: '黄金', content: '中'.repeat(130) }), true);
+  assert.equal(qualifiesArticleLength({ title: '中'.repeat(80), content: '中'.repeat(80) }), false);
+  assert.equal(qualifiesArticleLength({ title: `【央行报告】${'中'.repeat(130)}`, content: '' }), true);
 });
 
 test('source links keep original article URLs and resolve known relative paths', () => {
@@ -70,6 +83,7 @@ test('source links keep original article URLs and resolve known relative paths',
 });
 
 test('duplicate Chinese headlines merge without creating extra corroboration', () => {
+  assert.equal(sameHotspot('贵金属板块持续走高', '贵金属板块持续走高，赤峰黄金'), true);
   const rows = [
     make('中信建投：油价或维持区间波动', 1, { content: '中信建投预计油价或维持区间波动，机构正在关注海外产油国供给政策和库存变化。' }),
     make('中信建投: 油价或维持区间波动', 2, { content: '中信建投预计油价或维持区间波动，机构正在关注海外产油国供给政策和库存变化。', pub_time: '2026-10-16 10:33:00' }),
@@ -147,10 +161,11 @@ test('cached feed responds with deduplicated, ranked items and source provenance
     return { ok: true, text: async () => JSON.stringify([{ updated_at: new Date().toISOString(), payload: { data: {
       refreshedAt: new Date().toISOString(), tradingDate: true,
       items: [
-        { source: media.spider, item: { title: '中信建投：油价或维持区间波动', content: '中信建投预计油价或维持区间波动，机构正在关注海外产油国供给政策和库存变化。', url: 'https://example.com/oil/1' } },
-        { source: otherMedia.spider, item: { title: '中信建投：油价或维持区间波动', content: '另一媒体报道指出，近期炼厂开工和原油现货采购均有变化，投资者还将关注下一次库存数据。', url: 'https://example.com/oil/2' } },
-        { source: media.spider, item: { title: '国内玉米现货价格小幅波动', content: '国内玉米现货价格小幅波动，贸易商正观察主产区新粮上市和下游采购节奏。', url: 'https://example.com/corn/1' } },
-        { source: otherMedia.spider, item: { title: '国内玉米现货价格小幅波动', content: '另一份现货调查发现不同产区报价存在分化，饲料企业采购计划暂未明显调整。', url: 'https://example.com/corn/2' } },
+        { source: media.spider, item: { title: '中信建投：油价或维持区间波动', content: longArticle('中信建投预计油价或维持区间波动，机构正在关注海外产油国供给政策和库存变化。'), url: 'https://example.com/oil/1' } },
+        { source: otherMedia.spider, item: { title: '中信建投：油价或维持区间波动', content: longArticle('另一媒体报道指出，近期炼厂开工和原油现货采购均有变化，投资者还将关注下一次库存数据。'), url: 'https://example.com/oil/2' } },
+        { source: media.spider, item: { title: '国内玉米现货价格小幅波动', content: longArticle('国内玉米现货价格小幅波动，贸易商正观察主产区新粮上市和下游采购节奏。'), url: 'https://example.com/corn/1' } },
+        { source: otherMedia.spider, item: { title: '国内玉米现货价格小幅波动', content: longArticle('另一份现货调查发现不同产区报价存在分化，饲料企业采购计划暂未明显调整。'), url: 'https://example.com/corn/2' } },
+        { source: media.spider, item: { title: '黄金现货市场消息', content: '只有一条很短的资讯。', url: 'https://example.com/short' } },
         { source: 'unverified_spider', item: { title: '未经准入的资讯不得展示' } },
       ],
       sourceStatus: [{ source: media.spider, lastSuccessAt: new Date().toISOString(), lastCount: 3 }],
@@ -161,7 +176,9 @@ test('cached feed responds with deduplicated, ranked items and source provenance
     await handler({ method: 'GET', headers: { authorization: 'Bearer test' }, url: '/api/market-hotspots' }, response);
     assert.equal(response.code, 200);
     assert.equal(response.body.items.length, 2);
-    assert.equal(response.body.pipeline.rejected, 1);
+    assert.equal(response.body.pipeline.rejected, 2);
+    assert.equal(response.body.pipeline.rejectedShort, 1);
+    assert.equal(response.body.pipeline.minArticleChars, 130);
     assert.equal(response.body.pipeline.minSources, 1);
     assert.equal(response.body.pipeline.maxSources, 3);
     assert.ok(response.body.items.every((item) => item.score === item.scoring.total && item.sources.length >= 1 && item.sources.length <= 3));
@@ -182,8 +199,8 @@ test('analysis request enriches only the excerpt, without changing verified head
     if (String(url).includes('api.minimaxi.com')) return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ items: [{ id: 'hotspot-1', title: '不应覆盖原题', summary: '已采集资讯提供了机构对油价波动区间的观点；其依据和适用时间仍需查验原文，不能将该观点理解为确定的价格预测或交易建议。' }] }) } }] }) };
     return { ok: true, text: async () => JSON.stringify([{ updated_at: snapshot, payload: { data: {
       refreshedAt: snapshot, items: [
-        { source: media.spider, item: { title: '中信建投：油价或维持区间波动', content: '中信建投认为油价或维持区间波动，相关研究同时讨论了产油国供给变化和全球需求前景。', url: 'https://example.com/original', pub_time: '2026-10-16 10:30:00' } },
-        { source: otherMedia.spider, item: { title: '中信建投：油价或维持区间波动', content: '另一媒体报道产油国政策与现货库存的变化，对未来价格可能产生新的影响。', url: 'https://example.com/second', pub_time: '2026-10-16 10:31:00' } },
+        { source: media.spider, item: { title: '中信建投：油价或维持区间波动', content: longArticle('中信建投认为油价或维持区间波动，相关研究同时讨论了产油国供给变化和全球需求前景。'), url: 'https://example.com/original', pub_time: '2026-10-16 10:30:00' } },
+        { source: otherMedia.spider, item: { title: '中信建投：油价或维持区间波动', content: longArticle('另一媒体报道产油国政策与现货库存的变化，对未来价格可能产生新的影响。'), url: 'https://example.com/second', pub_time: '2026-10-16 10:31:00' } },
       ], sourceStatus: [],
     } } }]) };
   };

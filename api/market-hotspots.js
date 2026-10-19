@@ -15,6 +15,7 @@ const DEFAULT_SOURCES = [{
 }];
 const MAX_SOURCES = 8;
 const MAX_ITEMS_PER_SOURCE = 30;
+const MIN_ARTICLE_CHARS = 130;
 const CATEGORY_RULES = [
   ['农产品', /豆[粕油]|玉米|小麦|棉花|白糖|生猪|鸡蛋|苹果|红枣|油脂|粮食|农产/],
   ['有色及贵金属', /黄金|白银|有色金属|贵金属|沪[铜铝锌镍锡铅]|[铜铝锌镍锡铅](?:价|矿|锭|库存|现货|冶炼|期货|供应|供给|需求|产量)/],
@@ -30,7 +31,7 @@ const FUTURES_TERMS = /期货|期权|大宗商品|商品(?:价格|期货|市场)
 const IMPORTANT_TERMS = /央行|美联储|监管|货币政策|财政政策|利率|通胀|CPI|PPI|GDP|非农|关税|减产|增产|库存|交易所|数据公布/;
 const MACRO_HEADLINE_TERMS = /央行|美联储|利率|通胀|CPI|PPI|GDP|非农|美元|汇率|关税|欧佩克|OPEC|经济数据|财政政策|债券市场|收益率/;
 const GENERIC_HEADLINE = /^(期货|商品|市场|财经)(热点|快讯|资讯|新闻)(追踪|汇总|速览)?$/;
-const MARKET_TAPE_CONTEXT = /期货|期权|期市|合约|主力|燃油|燃料油|油价|原油|布油|美油|黄金|白银|沪[铜铝锌镍锡铅]|铁矿|螺纹|焦煤|焦炭|豆粕|豆油|玉米|生猪|国债|股指|期指|商品指数/;
+const MARKET_TAPE_CONTEXT = /期货|期权|期市|合约|主力|燃油|燃料油|油价|原油|布油|美油|黄金|白银|贵金属|有色金属|黑色系|农产品板块|能源化工板块|沪[铜铝锌镍锡铅]|铁矿|螺纹|焦煤|焦炭|豆粕|豆油|玉米|生猪|国债|股指|期指|商品指数/;
 const MARKET_TAPE_ACTION = /开盘|收盘|高开|低开|平开|盘中|早盘|午盘|夜盘|尾盘|涨超|跌超|涨逾|跌逾|涨幅|跌幅|涨停|跌停|上涨|下跌|拉升|跳水|走高|走低|升破|跌破|[涨跌]\s*\d|报(?:\d|[一二三四五六七八九十])/;
 const SOURCE_ORIGINS = {
   yicai_quick_news: 'https://www.yicai.com', sina_finance_news: 'https://finance.sina.com.cn',
@@ -69,6 +70,15 @@ function allArrays(value, arrays = [], depth = 0) {
 }
 function pickItems(payload) { return allArrays(payload).sort((a, b) => b.length - a.length)[0] || []; }
 function text(value) { return String(value == null ? '' : value).replace(/\s+/g, ' ').trim(); }
+function articleCharacterCount(item) {
+  // Some spiders put the full article in title; count the longest raw field,
+  // never title + excerpt combined (which would inflate short flashes).
+  const fields = [item?.content, item?.summary, item?.digest, item?.description,
+    item?.body, item?.article_text, item?.text, item?.title, item?.news_title, item?.newsTitle];
+  return Math.max(0, ...fields.map((value) =>
+    (text(value).replace(/<[^>]*>/g, ' ').match(/[\p{L}\p{N}]/gu) || []).length));
+}
+function qualifiesArticleLength(item) { return articleCharacterCount(item) >= MIN_ARTICLE_CHARS; }
 function normalizeDate(value) {
   const raw = text(value); if (!raw) return '';
   const cleaned = raw.replace(/年|月/g, '-').replace(/日/g, '').replace(/\//g, '-');
@@ -122,7 +132,7 @@ function conciseHeadline(value) {
 function normalizeItem(item, source, index) {
   const originalTitle = text(item?.title || item?.news_title || item?.newsTitle || item?.name || item?.content).slice(0, 900);
   const title = conciseHeadline(originalTitle);
-  const sourceSummary = text(item?.summary || item?.digest || item?.description || item?.content);
+  const sourceSummary = text(item?.summary || item?.digest || item?.description || item?.content || item?.body || item?.article_text || item?.text);
   // Preserve the long original title as the expandable excerpt when it carries
   // more detail than the source's separate summary/content field.
   const summary = (originalTitle.length > 52 && originalTitle.length > sourceSummary.length ? originalTitle : sourceSummary || originalTitle).slice(0, 900);
@@ -147,7 +157,7 @@ function sameHotspot(left, right) {
   const a = titleKey(left), b = titleKey(right); if (!a || !b) return false;
   if (a === b) return true;
   // Require a substantial shared run: short generic titles must not merge.
-  if (Math.min(a.length, b.length) >= 12 && Math.min(a.length, b.length) / Math.max(a.length, b.length) >= 0.5 && (a.includes(b) || b.includes(a))) return true;
+  if (Math.min(a.length, b.length) >= 8 && Math.min(a.length, b.length) / Math.max(a.length, b.length) >= 0.5 && (a.includes(b) || b.includes(a))) return true;
   if (Math.min(a.length, b.length) < 14) return false;
   // Headlines from the same speech often share a long attribution before “：”,
   // then quote different points from that one event.
@@ -320,7 +330,8 @@ module.exports = async (req, res) => {
     const feed = Array.isArray(snapshots) ? snapshots[0]?.payload?.data : null;
     if (!feed || !Array.isArray(feed.items)) return send(res, 503, { error: 'OMNIDATA_CACHE_EMPTY' });
     const admitted = feed.items.filter((entry) => entry && Object.hasOwn(VERIFIED_LABELS, entry.source));
-    const collected = admitted.map((entry, index) => normalizeItem(
+    const longEnough = admitted.filter((entry) => qualifiesArticleLength(entry.item));
+    const collected = longEnough.map((entry, index) => normalizeItem(
       entry.item,
       { spider: entry.source, label: VERIFIED_LABELS[entry.source] || entry.source, grade: 'B类·已核验' },
       index,
@@ -352,7 +363,8 @@ module.exports = async (req, res) => {
       stale, tradingDate: Boolean(feed.tradingDate && sameShanghaiDate),
       source: `服务器缓存：${Object.keys(VERIFIED_LABELS).length} 个已验证信源`,
       pipeline: {
-        collected: collected.length, rejected: feed.items.length - collected.length, clustered: clustered.length,
+        collected: collected.length, rejected: feed.items.length - collected.length, rejectedShort: admitted.length - longEnough.length,
+        minArticleChars: MIN_ARTICLE_CHARS, clustered: clustered.length,
         minSources: 1, maxSources: 3,
         sourcesRequested: Object.keys(VERIFIED_LABELS).length,
         sourcesSucceeded: statuses.filter((status) => status.ok).length,
@@ -372,4 +384,4 @@ module.exports = async (req, res) => {
 };
 
 // Pure helpers are exposed for regression tests; this does not create an API route.
-module.exports._test = { normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, sameEvidence, clusterItems, score };
+module.exports._test = { normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, sameEvidence, clusterItems, score };
