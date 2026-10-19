@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { normalizeItem, titleKey, sameHotspot, sameEvidence, clusterItems } = require('../api/market-hotspots')._test;
+const { normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, sameEvidence, clusterItems } = require('../api/market-hotspots')._test;
 const handler = require('../api/market-hotspots');
 
 const media = { spider: 'yicai_quick_news', label: '第一财经', grade: 'B类·已核验' };
@@ -43,10 +43,30 @@ test('long spider titles become core headlines while the complete source text st
 });
 
 test('long unbracketed title uses its first fact sentence and keeps the remaining context', () => {
-  const full = '国际原油期货价格周五上涨。交易员仍在评估主要产油国的供给变化，以及后续库存数据可能带来的影响。';
+  const full = '欧佩克宣布调整原油产量计划。交易员仍在评估主要产油国的供给变化，以及后续库存数据可能带来的影响。';
   const row = make(full, 6, { content: '' });
-  assert.equal(row.title, '国际原油期货价格周五上涨');
+  assert.equal(row.title, '欧佩克宣布调整原油产量计划');
   assert.equal(row.summary, full);
+});
+
+test('market price moves and opening-session headlines are not admitted as news', () => {
+  assert.equal(isMarketTape('燃油涨超5%'), true);
+  assert.equal(make('燃油涨超5%', 7), null);
+  assert.equal(make('油价涨5.2%', 12), null);
+  assert.equal(make('国债期货开盘', 13), null);
+  assert.equal(make('国债期货开盘多数上涨', 8), null);
+  assert.equal(make('沪铜主力合约盘中拉升', 9), null);
+  assert.ok(make('欧佩克宣布调整原油产量计划', 10));
+  assert.ok(make('欧佩克宣布减产推动油价上涨', 14));
+  assert.ok(make('日本央行行长植田和男：将根据经济形势调整货币政策', 11));
+});
+
+test('source links keep original article URLs and resolve known relative paths', () => {
+  assert.equal(articleUrl({ url: '/brief/123' }, media), 'https://www.yicai.com/brief/123');
+  assert.equal(articleUrl({ url: '//wallstreetcn.com/live/123' }, media), 'https://wallstreetcn.com/live/123');
+  assert.equal(articleUrl({ detailUrl: 'https://news.futunn.com/flash/123' }, media), 'https://news.futunn.com/flash/123');
+  assert.equal(articleUrl({ url: 'javascript:alert(1)' }, media), '');
+  assert.equal(articleUrl({}, media), '');
 });
 
 test('duplicate Chinese headlines merge without creating extra corroboration', () => {
@@ -82,6 +102,8 @@ test('five syndicated copies count as one report, while new facts count separate
   assert.equal(withNewFacts.duplicateCount, 4);
   assert.equal(withNewFacts.sources[0].title, title);
   assert.equal(withNewFacts.score, clusterItems([copies[0], added])[0].score);
+  const noLink = normalizeItem({ title, content: common, pub_time: '2026-10-16 13:59:00' }, { spider: 'no_link', label: '无线索媒体', grade: 'B类·已核验' }, 7);
+  assert.equal(clusterItems([noLink, copies[0]])[0].sources[0].url, 'https://example.com/wire/0');
 });
 
 test('similar remarks from one speech form one hotspot with one to three sources', () => {
@@ -98,6 +120,21 @@ test('similar remarks from one speech form one hotspot with one to three sources
   assert.equal(clusterItems(rows)[0].sources.length, 3);
   const extra = Array.from({ length: 4 }, (_, index) => ({ ...rows[index], source: `补充媒体${index + 1}`, sourceUrl: `https://example.com/additional/${index}`, summary: `补充媒体第${index + 1}篇报道介绍了另一项政策依据，其中包括与其他报道不同的调查结果和决策过程说明。` }));
   assert.equal(clusterItems([...rows, ...extra])[0].sources.length, 3);
+});
+
+test('short shared speaker lead merges different central-bank remarks in one session', () => {
+  const titles = [
+    '日本央行行长植田和男：如果日本央行的政策利率没有得到适当调整，市场对通胀超调风险的担忧可能推高长期利率',
+    '日本央行行长植田和男：通过实施适当的货币政策以实现2%的通胀目标',
+    '日本央行行长植田和男：现在谈论日本国债的特殊举措并不合适',
+    '日本央行行长植田和男：日本央行将全面审视市场状况',
+    '日本央行行长：潜在通胀非常接近价格目标',
+  ];
+  assert.equal(sameSpeakerLead(titles[0], titles[1]), true);
+  const rows = titles.map((title, index) => normalizeItem({ title, content: `${title}，这份报道补充了第${index + 1}项不同的政策背景。`, pub_time: `2026-10-19 08:2${index}:00`, url: `https://example.com/speaker/${index}` }, { spider: `speaker${index}`, label: `媒体${index + 1}`, grade: 'B类·已核验' }, index));
+  assert.equal(clusterItems(rows).length, 1);
+  assert.equal(clusterItems(rows)[0].sources.length, 3);
+  assert.equal(sameSpeakerLead(titles[0], '美国央行官员：讨论美元政策'), false);
 });
 
 test('cached feed responds with deduplicated, ranked items and source provenance', async () => {

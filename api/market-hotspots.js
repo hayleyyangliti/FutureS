@@ -30,6 +30,16 @@ const FUTURES_TERMS = /期货|期权|大宗商品|商品(?:价格|期货|市场)
 const IMPORTANT_TERMS = /央行|美联储|监管|货币政策|财政政策|利率|通胀|CPI|PPI|GDP|非农|关税|减产|增产|库存|交易所|数据公布/;
 const MACRO_HEADLINE_TERMS = /央行|美联储|利率|通胀|CPI|PPI|GDP|非农|美元|汇率|关税|欧佩克|OPEC|经济数据|财政政策|债券市场|收益率/;
 const GENERIC_HEADLINE = /^(期货|商品|市场|财经)(热点|快讯|资讯|新闻)(追踪|汇总|速览)?$/;
+const MARKET_TAPE_CONTEXT = /期货|期权|期市|合约|主力|燃油|燃料油|油价|原油|布油|美油|黄金|白银|沪[铜铝锌镍锡铅]|铁矿|螺纹|焦煤|焦炭|豆粕|豆油|玉米|生猪|国债|股指|期指|商品指数/;
+const MARKET_TAPE_ACTION = /开盘|收盘|高开|低开|平开|盘中|早盘|午盘|夜盘|尾盘|涨超|跌超|涨逾|跌逾|涨幅|跌幅|涨停|跌停|上涨|下跌|拉升|跳水|走高|走低|升破|跌破|[涨跌]\s*\d|报(?:\d|[一二三四五六七八九十])/;
+const SOURCE_ORIGINS = {
+  yicai_quick_news: 'https://www.yicai.com', sina_finance_news: 'https://finance.sina.com.cn',
+  hexun_global_news: 'https://news.hexun.com', futunn_flash_news: 'https://news.futunn.com',
+  wallstreetcn_global_news: 'https://wallstreetcn.com', jin10_flash_news: 'https://flash.jin10.com',
+  fortune_flash_news: 'https://fortune.com', marketwatch_flash_news: 'https://www.marketwatch.com',
+  '21jingji_quick_news': 'https://www.21jingji.com', ths_10jqka_global_news: 'https://news.10jqka.com.cn',
+  jrj_news_flash: 'https://24h.jrj.com.cn',
+};
 
 function parseSources() {
   const raw = (process.env.OMNIDATA_HOTSPOT_SOURCES || '').trim();
@@ -73,6 +83,29 @@ function contractsFor(value) {
   const names = ['黄金', '白银', '沪铜', '沪铝', '原油', '燃料油', '沥青', '螺纹钢', '铁矿石', '焦煤', '焦炭', '豆粕', '豆油', '玉米', '棉花', '白糖', '生猪', '甲醇', 'PTA', '橡胶', '碳酸锂', '国债', '股指'];
   return names.filter((name) => value.includes(name.replace(/^沪/, ''))).slice(0, 4);
 }
+function isMarketTape(title) {
+  const lead = text(title).split(/[，,。；;]/, 1)[0];
+  return MARKET_TAPE_CONTEXT.test(lead) && MARKET_TAPE_ACTION.test(lead) &&
+    !/(?:宣布|决定|公布|发布|批准|签署|出台|实施|减产|增产|出口|进口|库存|报告|数据)/.test(lead);
+}
+function articleUrl(item, source) {
+  const candidates = [item?.url, item?.link, item?.news_url, item?.newsUrl, item?.article_url,
+    item?.source_url, item?.sourceUrl, item?.href, item?.detailUrl, item?.pcInfoUrl,
+    item?.infoUrl, item?.ShareUrl, item?.source_link, item?.uri, item?.entityurl];
+  for (const value of candidates) {
+    const raw = text(value).replace(/&amp;/g, '&');
+    if (!raw) continue;
+    const absolute = raw.startsWith('//') ? `https:${raw}` : /^www\./i.test(raw) ? `https://${raw}` : raw;
+    const origin = SOURCE_ORIGINS[source.spider];
+    if (!/^https?:\/\//i.test(absolute) && !absolute.startsWith('/') && !absolute.includes('/')) continue;
+    if (!/^https?:\/\//i.test(absolute) && !origin) continue;
+    try {
+      const url = new URL(absolute, origin);
+      if (/^https?:$/.test(url.protocol) && url.hostname.includes('.')) return url.href;
+    } catch (_) { /* Try the next URL field. */ }
+  }
+  return '';
+}
 function conciseHeadline(value) {
   const raw = text(value);
   // Many spiders put a short editor headline in 【】 and append the article body.
@@ -93,11 +126,11 @@ function normalizeItem(item, source, index) {
   // Preserve the long original title as the expandable excerpt when it carries
   // more detail than the source's separate summary/content field.
   const summary = (originalTitle.length > 52 && originalTitle.length > sourceSummary.length ? originalTitle : sourceSummary || originalTitle).slice(0, 900);
-  if (!title || title.length < 6 || GENERIC_HEADLINE.test(title) || (!FUTURES_TERMS.test(title) && !MACRO_HEADLINE_TERMS.test(title))) return null;
+  if (!title || title.length < 6 || GENERIC_HEADLINE.test(title) || isMarketTape(title) || (!FUTURES_TERMS.test(title) && !MACRO_HEADLINE_TERMS.test(title))) return null;
   const content = `${title} ${summary}`;
   return {
     id: `${source.spider}:${item?.id || item?.code || index}`, title, originalTitle, summary,
-    sourceUrl: text(item?.url || item?.link || item?.news_url || item?.newsUrl || item?.article_url || item?.source_url || item?.sourceUrl || item?.href),
+    sourceUrl: articleUrl(item, source),
     source: text(item?.source || item?.media || item?.publisher || item?.platform || source.label || source.spider),
     publishedAt: normalizeDate(item?.pub_time || item?.publish_time || item?.publishTime || item?.published_at || item?.publishedAt || item?.time || item?.datetime || item?.date),
     grade: source.grade, category: classify(title), contracts: contractsFor(title),
@@ -123,9 +156,21 @@ function sameHotspot(left, right) {
   if (Math.min(leadA.length, leadB.length) >= 14 && pairOverlap(leadA, leadB) >= 0.8) return true;
   return pairOverlap(a, b) >= 0.5;
 }
+function sameSpeakerLead(left, right) {
+  const leadA = titleKey(text(left).split(/[：:]/, 1)[0]);
+  const leadB = titleKey(text(right).split(/[：:]/, 1)[0]);
+  const similar = pairOverlap(leadA, leadB) >= 0.8 ||
+    (Math.min(leadA.length, leadB.length) >= 6 && (leadA.includes(leadB) || leadB.includes(leadA)));
+  return Math.min(leadA.length, leadB.length) >= 6 && similar &&
+    /(?:央行|行长|主席|部长|发言人|官员|代表)/.test(leadA) && /(?:央行|行长|主席|部长|发言人|官员|代表)/.test(leadB);
+}
 function sameEventWindow(left, right) {
   const a = Date.parse(left.publishedAt || ''), b = Date.parse(right.publishedAt || '');
   return !Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a - b) <= 24 * 60 * 60 * 1000;
+}
+function sameSpeechWindow(left, right) {
+  const a = Date.parse(left.publishedAt || ''), b = Date.parse(right.publishedAt || '');
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= 2 * 60 * 60 * 1000;
 }
 function ageMinutes(value) { const date = new Date(value); return !value || Number.isNaN(date.getTime()) ? null : Math.max(0, (Date.now() - date.getTime()) / 60000); }
 function evidenceKey(item) {
@@ -157,14 +202,20 @@ function score(primary, sources) {
 function clusterItems(items) {
   const clusters = [];
   for (const item of items) {
-    let cluster = clusters.find((candidate) => candidate.items.some((entry) => (sameHotspot(entry.title, item.title) && sameEventWindow(entry, item)) || (item.sourceUrl && entry.sourceUrl === item.sourceUrl)));
+    let cluster = clusters.find((candidate) => candidate.items.some((entry) =>
+      (sameHotspot(entry.title, item.title) && sameEventWindow(entry, item)) ||
+      (sameSpeakerLead(entry.title, item.title) && sameSpeechWindow(entry, item)) ||
+      (item.sourceUrl && entry.sourceUrl === item.sourceUrl)));
     if (!cluster) { cluster = { items: [] }; clusters.push(cluster); }
     cluster.items.push(item);
   }
   return clusters.map((cluster, index) => {
     const distinct = [];
     for (const item of [...cluster.items].sort((a, b) => Date.parse(a.publishedAt || 0) - Date.parse(b.publishedAt || 0))) {
-      if (!distinct.some((entry) => sameEvidence(entry, item))) distinct.push(item);
+      const duplicateIndex = distinct.findIndex((entry) =>
+        (item.sourceUrl && entry.sourceUrl === item.sourceUrl) || sameEvidence(entry, item));
+      if (duplicateIndex < 0) distinct.push(item);
+      else if (!distinct[duplicateIndex].sourceUrl && item.sourceUrl) distinct[duplicateIndex] = item;
     }
     const sources = distinct.filter((item, position) => distinct.findIndex((entry) => entry.source === item.source) === position).map((item) => ({ name: item.source, url: item.sourceUrl, publishedAt: item.publishedAt, grade: item.grade, title: item.title })).slice(0, 3);
     // Keep single-source events visible while still excluding repeated copies.
@@ -321,4 +372,4 @@ module.exports = async (req, res) => {
 };
 
 // Pure helpers are exposed for regression tests; this does not create an API route.
-module.exports._test = { normalizeItem, titleKey, sameHotspot, sameEvidence, clusterItems, score };
+module.exports._test = { normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, sameEvidence, clusterItems, score };
