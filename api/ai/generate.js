@@ -1,6 +1,7 @@
 const { currentProfile, send } = require('../_supabase');
 
 const MINIMAX_ENDPOINT = 'https://api.minimaxi.com/v1/text/chatcompletion_v2';
+const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/chat/completions';
 const MAX_INPUT_LENGTH = 8000;
 
 function cleanText(value, maxLength = MAX_INPUT_LENGTH) {
@@ -35,10 +36,13 @@ module.exports = async (req, res) => {
 
   try {
     await currentProfile(req);
-    const apiKey = cleanText(process.env.MINIMAX_API_KEY, 1000);
-    if (!apiKey) return send(res, 503, { error: 'MINIMAX_NOT_CONFIGURED' });
-
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+    const provider = cleanText(body.model, 40) || 'MiniMax';
+    if (!['MiniMax', 'DeepSeek'].includes(provider)) return send(res, 400, { error: 'UNSUPPORTED_MODEL' });
+    const isDeepSeek = provider === 'DeepSeek';
+    const apiKey = cleanText(isDeepSeek ? process.env.DEEPSEEK_API_KEY : process.env.MINIMAX_API_KEY, 1000);
+    if (!apiKey) return send(res, 503, { error: isDeepSeek ? 'DEEPSEEK_NOT_CONFIGURED' : 'MINIMAX_NOT_CONFIGURED' });
+    const model = isDeepSeek ? (process.env.DEEPSEEK_MODEL || 'deepseek-flash') : (process.env.MINIMAX_MODEL || 'MiniMax-M2.7');
     const topic = cleanText(body.topic, 1000);
     const instruction = cleanText(body.instruction);
     const contentType = cleanText(body.contentType, 80) || '营销页面文案';
@@ -50,7 +54,7 @@ module.exports = async (req, res) => {
     const timeout = setTimeout(() => controller.abort(), 50000);
     let response;
     try {
-      response = await fetch(MINIMAX_ENDPOINT, {
+      response = await fetch(isDeepSeek ? DEEPSEEK_ENDPOINT : MINIMAX_ENDPOINT, {
         method: 'POST',
         signal: controller.signal,
         headers: {
@@ -58,14 +62,16 @@ module.exports = async (req, res) => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: process.env.MINIMAX_MODEL || 'MiniMax-M2.7',
+          model,
           messages: [
             { role: 'system', content: '你是严谨的中文期货内容编辑助手。输出必须遵守用户给出的 JSON 格式。' },
             { role: 'user', content: buildPrompt({ topic, instruction, contentType, subtype, candidateMode }) },
           ],
           stream: false,
           temperature: 0.7,
-          max_completion_tokens: candidateMode ? 1200 : 2400,
+          ...(isDeepSeek
+            ? { max_tokens: candidateMode ? 1200 : 2400, response_format: { type: 'json_object' } }
+            : { max_completion_tokens: candidateMode ? 1200 : 2400 }),
         }),
       });
     } finally {
@@ -74,19 +80,19 @@ module.exports = async (req, res) => {
 
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      console.error('MiniMax generation failed', {
+      console.error(`${provider} generation failed`, {
         status: response.status,
         code: payload?.base_resp?.status_code || payload?.code || null,
         message: payload?.base_resp?.status_msg || payload?.message || payload?.msg || null,
         requestId: payload?.id || payload?.request_id || null,
       });
-      return send(res, 502, { error: 'MINIMAX_REQUEST_FAILED' });
+      return send(res, 502, { error: isDeepSeek ? 'DEEPSEEK_REQUEST_FAILED' : 'MINIMAX_REQUEST_FAILED' });
     }
 
     const content = payload?.choices?.[0]?.message?.content;
     if (!content) {
-      console.error('MiniMax returned no content', { requestId: payload?.id || payload?.request_id || null });
-      return send(res, 502, { error: 'MINIMAX_EMPTY_RESPONSE' });
+      console.error(`${provider} returned no content`, { requestId: payload?.id || payload?.request_id || null });
+      return send(res, 502, { error: isDeepSeek ? 'DEEPSEEK_EMPTY_RESPONSE' : 'MINIMAX_EMPTY_RESPONSE' });
     }
 
     const result = parseModelJson(content, topic || '期市内容初稿');
@@ -96,8 +102,8 @@ module.exports = async (req, res) => {
         .map((item) => ({ title: cleanText(item?.title, 160), body: cleanText(item?.body, 3000) }))
         .filter((item) => item.body)
         .slice(0, 3);
-      if (!safeCandidates.length) return send(res, 502, { error: 'MINIMAX_INVALID_RESPONSE' });
-      return send(res, 200, { candidates: safeCandidates, model: process.env.MINIMAX_MODEL || 'MiniMax-M2.7' });
+      if (!safeCandidates.length) return send(res, 502, { error: isDeepSeek ? 'DEEPSEEK_INVALID_RESPONSE' : 'MINIMAX_INVALID_RESPONSE' });
+      return send(res, 200, { candidates: safeCandidates, model, provider });
     }
 
     const generated = {
@@ -105,13 +111,13 @@ module.exports = async (req, res) => {
       body: cleanText(result.body, 12000),
       sources: Array.isArray(result.sources) ? result.sources.map((item) => cleanText(item, 200)).filter(Boolean).slice(0, 5) : [],
     };
-    if (!generated.body) return send(res, 502, { error: 'MINIMAX_INVALID_RESPONSE' });
-    return send(res, 200, { ...generated, model: process.env.MINIMAX_MODEL || 'MiniMax-M2.7' });
+    if (!generated.body) return send(res, 502, { error: isDeepSeek ? 'DEEPSEEK_INVALID_RESPONSE' : 'MINIMAX_INVALID_RESPONSE' });
+    return send(res, 200, { ...generated, model, provider });
   } catch (error) {
     if (error.message === 'UNAUTHORIZED') return send(res, 401, { error: 'UNAUTHORIZED' });
     if (error.message === 'PROFILE_NOT_FOUND') return send(res, 403, { error: 'PROFILE_NOT_FOUND' });
     if (error instanceof SyntaxError) return send(res, 400, { error: 'INVALID_REQUEST_BODY' });
-    if (error.name === 'AbortError') return send(res, 504, { error: 'MINIMAX_TIMEOUT' });
+    if (error.name === 'AbortError') return send(res, 504, { error: 'AI_GENERATION_TIMEOUT' });
     console.error('AI generation unavailable', error);
     return send(res, 500, { error: 'AI_GENERATION_UNAVAILABLE' });
   }
