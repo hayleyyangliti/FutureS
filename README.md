@@ -50,12 +50,13 @@ supabase/test-accounts.sql  杨莉缇、王宇测试账号资料脚本
 | `OMNIDATA_BASE_URL` | 你的 OmniData 服务地址，例如 `https://omnidata-vercel-adapter-production.up.railway.app` |
 | `OMNIDATA_API_TOKEN` | OmniData 项目中设置的同名令牌 |
 | `MINIMAX_API_KEY` | MiniMax 开放平台生成的 API Key，仅供服务端调用 |
+| `DEEPSEEK_API_KEY` | DeepSeek 开放平台生成的 API Key，仅供服务端调用；启用 DeepSeek 时必填 |
 
-可选新增 `MINIMAX_MODEL`。若未设置，测试包默认调用 `MiniMax-M2.7`。
+可选新增 `MINIMAX_MODEL` 和 `DEEPSEEK_MODEL`。若未设置，分别调用 `MiniMax-M2.7` 和 `deepseek-flash`。已有 MiniMax 配置和默认选项保持不变。
 
 `SUPABASE_SERVICE_ROLE_KEY` 只能保存在 Vercel 服务端环境变量，绝不能粘贴到前端文件或提交 GitHub。
 `OMNIDATA_API_TOKEN` 同样只能保存在 Vercel 服务端环境变量。市场热点中心会经由 `/api/market-hotspots` 请求 OmniData，浏览器不会获得该令牌。
-`MINIMAX_API_KEY` 也只由 `/api/ai/generate` 在服务端读取，浏览器不会获得该密钥。AI Studio 的“开始生成内容”会把当前选题、内容分类和生成指令发送至该服务端接口，再由接口调用 MiniMax 文本生成 API。上传参考文件目前只展示文件名，尚未将文件正文解析后发送给模型。
+`MINIMAX_API_KEY` 与 `DEEPSEEK_API_KEY` 都只由 `/api/ai/generate` 在服务端读取，浏览器不会获得密钥。AI Studio 的模型下拉框可选择 MiniMax 或 DeepSeek；“开始生成内容”会把当前选题、内容分类、生成指令和所选模型发送至服务端，由服务端调用对应模型 API。切换模型不会自动回退到另一模型。上传参考文件目前只展示文件名，尚未将文件正文解析后发送给模型。
 
 ### 市场热点中心：配置准入信源
 
@@ -76,7 +77,7 @@ supabase/test-accounts.sql  杨莉缇、王宇测试账号资料脚本
 ## 当前测试范围
 
 - 已接入：邮箱＋密码登录、Supabase 用户资料和开发者角色读取。
-- 已接入：AI Studio 通过服务端调用 MiniMax 生成内容初稿；模型输出仍必须经人工核验后再保存或发布。
+- 已接入：AI Studio 通过服务端调用 MiniMax 或 DeepSeek 生成内容初稿；模型输出仍必须经人工核验后再保存或发布。
 - 已预置：案例数据表与 `GET/POST /api/cases` 接口，供下一阶段将案例库交互改为真实读写。
 - 已接入：登录用户点击“刷新热点”时，通过服务端读取 OmniData 爬虫注册表，并调用已配置的准入信源；结果会经过聚类去重、重要性/时效性/信息增量/期货相关性四维评分、品类归属和 Top 20 排序。未配置准入清单时仅兼容东方财富快讯，不能代表完整热点池。
 - 后续接 Dataphin 时：由 Vercel 的服务端接口请求 Dataphin，再把数据返回前端；不要让浏览器直接持有 Dataphin 凭证。
