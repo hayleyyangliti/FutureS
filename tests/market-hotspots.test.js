@@ -222,14 +222,14 @@ test('cached feed responds with deduplicated, ranked items and source provenance
   }
 });
 
-test('analysis request enriches only the excerpt, without changing verified headline or sources', async () => {
+test('analysis scores without changing verified headline, original excerpt or sources', async () => {
   const previousFetch = global.fetch;
   const previousEnv = Object.fromEntries(['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'MINIMAX_API_KEY'].map((key) => [key, process.env[key]]));
   Object.assign(process.env, { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_ANON_KEY: 'public-test', SUPABASE_SERVICE_ROLE_KEY: 'server-test', MINIMAX_API_KEY: 'model-test' });
   const snapshot = '2026-10-16T11:00:00.000Z';
   global.fetch = async (url) => {
     if (String(url).endsWith('/rpc/current_profile')) return { ok: true, json: async () => [{ auth_user_id: 'test-user' }] };
-    if (String(url).includes('api.minimaxi.com')) return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ items: [{ id: 'hotspot-1', title: '不应覆盖原题', summary: '已采集资讯提供了机构对油价波动区间的观点；其依据和适用时间仍需查验原文，不能将该观点理解为确定的价格预测或交易建议。' }] }) } }] }) };
+    if (String(url).includes('api.minimaxi.com')) return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ items: [{ id: 'hotspot-1', importance: 22, informationGain: 8, futuresRelevance: 7, reasons: { importance: '机构观点，影响范围有限', informationGain: '有补充事实，非重复转载', futuresRelevance: '油价直接关联原油期货' }, evidence: '油价' }] }) } }] }) };
     return { ok: true, text: async () => JSON.stringify([{ updated_at: snapshot, payload: { data: {
       refreshedAt: snapshot, items: [
         { source: media.spider, item: { title: '中信建投：油价或维持区间波动', content: longArticle('中信建投认为油价或维持区间波动，相关研究同时讨论了产油国供给变化和全球需求前景。'), url: 'https://example.com/original', pub_time: '2026-10-16 10:30:00' } },
@@ -241,8 +241,11 @@ test('analysis request enriches only the excerpt, without changing verified head
   try {
     await handler({ method: 'GET', headers: { authorization: 'Bearer test' }, url: '/api/market-hotspots?analysis=1' }, response);
     assert.equal(response.code, 200);
-    assert.equal(response.body.ai.status, 'GENERATED');
-    assert.equal(response.body.items[0].summaryType, 'AI_DRAFT');
+    assert.equal(response.body.ai.status, 'SCORED');
+    assert.equal(response.body.items[0].scoringMethod, 'MODEL');
+    assert.equal(response.body.items[0].scoringProvider, 'MiniMax');
+    assert.equal(response.body.items[0].scoring.futuresRelevance, 7);
+    assert.equal(response.body.items[0].summaryType, 'SOURCE_EXCERPT');
     assert.equal(response.body.items[0].title, '中信建投：油价或维持区间波动');
     assert.equal(response.body.items[0].sources[0].url, 'https://example.com/original');
   } finally {
