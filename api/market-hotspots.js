@@ -72,15 +72,40 @@ function allArrays(value, arrays = [], depth = 0) {
 }
 function pickItems(payload) { return allArrays(payload).sort((a, b) => b.length - a.length)[0] || []; }
 function text(value) { return String(value == null ? '' : value).replace(/\s+/g, ' ').trim(); }
+function articleFields(item) {
+  return [item?.content, item?.summary, item?.digest, item?.description, item?.body,
+    item?.article_text, item?.text, item?.news_content, item?.newsContent,
+    item?.content_text, item?.article?.content, item?.article?.text,
+    item?.title, item?.news_title, item?.newsTitle].filter(value => typeof value === 'string')
+    .map(value => text(value.replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/g, ' ')));
+}
 function articleCharacterCount(item) {
   // Some spiders put the full article in title; count the longest raw field,
   // never title + excerpt combined (which would inflate short flashes).
-  const fields = [item?.content, item?.summary, item?.digest, item?.description,
-    item?.body, item?.article_text, item?.text, item?.title, item?.news_title, item?.newsTitle];
+  const fields = articleFields(item);
   return Math.max(0, ...fields.map((value) =>
     (text(value).replace(/<[^>]*>/g, ' ').match(/[\p{L}\p{N}]/gu) || []).length));
 }
 function qualifiesArticleLength(item) { return articleCharacterCount(item) >= MIN_ARTICLE_CHARS; }
+function qualifiesShortCandidate(item) {
+  const facts = articleFields(item).join(' ');
+  return articleCharacterCount(item) >= 12 && !qualifiesArticleLength(item) &&
+    /央行|人民银行|国务院|财政部|发改委|海关总署|国家统计局|美联储|欧佩克|OPEC|甘其毛都|蒙煤|苏伊士|霍尔木兹|红海|伊朗|煤矿|钢厂|炼厂|交易所/.test(facts) &&
+    /降准|降息|加息|暂停|通关|进口|出口|封锁|制裁|冲突|中断|停产|复产|减产|增产|关税|配额|收储|抛储|公布|发布|决定|调整/.test(facts);
+}
+function bodyMarketContext(value) {
+  // Both a commodity and a concrete driver must occur in the same sentence.
+  return value.split(/[。！？!?]/).some(sentence =>
+    /原油|石油|天然气|煤炭|焦煤|焦炭|铁矿|钢材|螺纹|铜矿|铝锭|氧化铝|锂矿|碳酸锂|豆粕|大豆|玉米|小麦|棉花|白糖|生猪|橡胶|甲醇|PTA|尿素|粮食/.test(sentence) &&
+    /(?:供应|供给|产量|产能|开工|检修|停产|复产|库存|进口|出口|通关|运量|收储|抛储|限产|减产|增产|关税|配额|收割|播种|旱情|洪涝)/.test(sentence));
+}
+function macroContext(value) {
+  return /降准|降息|加息|逆回购|MLF|LPR|专项债|特别国债|财政刺激|货币政策|财政政策|社融|工业增加值|固定资产投资|制造业PMI|采购经理指数|进出口数据|失业率|零售销售|消费物价|生产者物价/.test(value);
+}
+function scopeFor(title, summary, item = {}) {
+  const explicit = text(item.country || item.region || item.location);
+  return newsScope(explicit) !== 'other' ? newsScope(explicit) : newsScope(title) !== 'other' ? newsScope(title) : newsScope(summary);
+}
 function normalizeDate(value) {
   const raw = text(value); if (!raw) return '';
   const cleaned = raw.replace(/年|月/g, '-').replace(/日/g, '').replace(/\//g, '-');
@@ -116,10 +141,21 @@ function articleUrl(item, source) {
     if (!/^https?:\/\//i.test(absolute) && !origin) continue;
     try {
       const url = new URL(absolute, origin);
-      if (/^https?:$/.test(url.protocol) && url.hostname.includes('.')) return url.href;
+      if (/^https?:$/.test(url.protocol) && url.hostname.includes('.') && isArticleIdentity(url.href)) return url.href;
     } catch (_) { /* Try the next URL field. */ }
   }
   return '';
+}
+function isArticleIdentity(value) {
+  try {
+    const url = new URL(value);
+    const path = url.pathname.replace(/\/+$/, '');
+    // Shared home/channel/feed URLs are not article identities.
+    if (!path || /^\/(?:news|finance|stock|futures|live|flash|quick|latest|telegraph|roll|index(?:\.html?)?)$/i.test(path)) {
+      return [...url.searchParams.keys()].some(key => /^(?:id|article_id|newsid|docid)$/i.test(key));
+    }
+    return true;
+  } catch (_) { return false; }
 }
 function conciseHeadline(value) {
   const raw = text(value);
@@ -137,21 +173,24 @@ function conciseHeadline(value) {
 function normalizeItem(item, source, index) {
   const originalTitle = text(item?.title || item?.news_title || item?.newsTitle || item?.name || item?.content).slice(0, 900);
   const title = conciseHeadline(originalTitle);
-  const sourceSummary = text(item?.summary || item?.digest || item?.description || item?.content || item?.body || item?.article_text || item?.text);
+  const sourceSummary = articleFields(item).sort((a, b) => b.length - a.length)[0] || '';
   // Preserve the long original title as the expandable excerpt when it carries
   // more detail than the source's separate summary/content field.
   const summary = (originalTitle.length > 52 && originalTitle.length > sourceSummary.length ? originalTitle : sourceSummary || originalTitle).slice(0, 900);
   const supplyChain = SUPPLY_CHAIN_TERMS.test(`${title} ${summary}`);
+  const bodyRelevant = bodyMarketContext(sourceSummary) || macroContext(`${title} ${sourceSummary}`);
+  const incidentalMacro = /旅游|文旅|景区|电影|文化节/.test(title) && !FUTURES_TERMS.test(title) && !supplyChain && !bodyRelevant;
   // A passing commodity reference in the body must not admit unrelated stories.
-  if (!title || title.length < 6 || GENERIC_HEADLINE.test(title) || isMarketTape(title) || (!FUTURES_TERMS.test(title) && !MACRO_HEADLINE_TERMS.test(title) && !supplyChain)) return null;
-  const relevanceText = supplyChain ? `${title} ${summary}` : title;
+  if (!title || title.length < 6 || GENERIC_HEADLINE.test(title) || isMarketTape(title) || incidentalMacro || (!FUTURES_TERMS.test(title) && !MACRO_HEADLINE_TERMS.test(title) && !supplyChain && !bodyRelevant)) return null;
+  const relevanceText = supplyChain || bodyRelevant ? `${title} ${summary}` : title;
   return {
     id: `${source.spider}:${item?.id || item?.code || index}`, title, originalTitle, summary,
     sourceUrl: articleUrl(item, source),
     source: text(item?.source || item?.media || item?.publisher || item?.platform || source.label || source.spider),
     publishedAt: normalizeDate(item?.pub_time || item?.publish_time || item?.publishTime || item?.published_at || item?.publishedAt || item?.time || item?.datetime || item?.date),
     grade: source.grade, category: classify(relevanceText), contracts: contractsFor(relevanceText),
-    scope: newsScope(title) === 'other' ? newsScope(summary) : newsScope(title), supplyChain,
+    scope: scopeFor(title, sourceSummary, item), supplyChain,
+    articleChars: articleCharacterCount(item), shortNotice: !qualifiesArticleLength(item),
   };
 }
 // \W is ASCII-only in JavaScript and silently discards Chinese titles.
@@ -219,13 +258,13 @@ function score(primary, sources) {
   const futuresRelevance = direct ? 10 : macro ? 6 : 0;
   return { importance, timeliness, informationGain, futuresRelevance, total: importance + timeliness + informationGain + futuresRelevance };
 }
-function clusterItems(items) {
+function clusterItems(items, limit = 20) {
   const clusters = [];
   for (const item of items) {
-    let cluster = clusters.find((candidate) => candidate.items.some((entry) =>
+    let cluster = clusters.find((candidate) => candidate.items.slice(0, 1).some((entry) =>
       (sameHotspot(entry.title, item.title) && sameEventWindow(entry, item)) ||
       (sameSpeakerLead(entry.title, item.title) && sameSpeechWindow(entry, item)) ||
-      (item.sourceUrl && entry.sourceUrl === item.sourceUrl)));
+      (isArticleIdentity(item.sourceUrl) && entry.sourceUrl === item.sourceUrl && sameEvidence(entry, item))));
     if (!cluster) { cluster = { items: [] }; clusters.push(cluster); }
     cluster.items.push(item);
   }
@@ -233,7 +272,7 @@ function clusterItems(items) {
     const distinct = [];
     for (const item of [...cluster.items].sort((a, b) => Date.parse(a.publishedAt || 0) - Date.parse(b.publishedAt || 0))) {
       const duplicateIndex = distinct.findIndex((entry) =>
-        (item.sourceUrl && entry.sourceUrl === item.sourceUrl) || sameEvidence(entry, item));
+        sameEvidence(entry, item));
       if (duplicateIndex < 0) distinct.push(item);
       else if (!distinct[duplicateIndex].sourceUrl && item.sourceUrl) distinct[duplicateIndex] = item;
     }
@@ -244,12 +283,13 @@ function clusterItems(items) {
     const firstPublishedAt = cluster.items.map((item) => item.publishedAt).filter((value) => Number.isFinite(Date.parse(value))).sort()[0] || primary.publishedAt;
     const grade = sources.some((source) => source.grade === 'A类信源') ? 'A类信源' : 'B类·已核验';
     const scoring = score({ ...primary, publishedAt: firstPublishedAt, grade }, sources);
-    return { id: `hotspot-${index + 1}`, title: primary.title, summary: primary.summary, summaryType: primary.summary === primary.title ? 'TITLE_ONLY' : 'SOURCE_EXCERPT', source: primary.source, sourceUrl: primary.sourceUrl, publishedAt: firstPublishedAt, grade, category: primary.category, contracts: primary.contracts, scope: primary.scope || 'other', sources, duplicateCount: cluster.items.length - distinct.length, scoring, score: scoring.total };
+    return { id: `hotspot-${index + 1}`, title: primary.title, summary: primary.summary, summaryType: primary.summary === primary.title ? 'TITLE_ONLY' : 'SOURCE_EXCERPT', source: primary.source, sourceUrl: primary.sourceUrl, publishedAt: firstPublishedAt, grade, category: primary.category, contracts: primary.contracts, scope: primary.scope || 'other', sources, duplicateCount: cluster.items.length - distinct.length, scoring, score: scoring.total, shortNotice: cluster.items.every(item => item.shortNotice), articleChars: Math.max(...cluster.items.map(item => item.articleChars || 0)) };
   }).filter(Boolean).sort((a, b) => b.score - a.score || Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0));
-  return selectCoverage(ranked);
+  return limit === null ? ranked : selectCoverage(ranked, limit);
 }
 function newsScope(value) {
-  if (/国内|我国|中国|人民币|国务院|发改委|海关总署|商务部|国家能源局|中国人民银行|央行逆回购|上期所|大商所|郑商所|中金所|甘其毛都|策克口岸|满都拉口岸|蒙煤|内蒙古|山西|山东|唐山|河北|青岛港|日照港/.test(value)) return 'domestic';
+  if (/美国财政部|美国商务部|美国农业部|日本财政部|日本央行|韩国央行|欧洲央行|新西兰央行|澳大利亚央行|加拿大央行/.test(value)) return 'international';
+  if (/国内|我国|中国|人民币|国务院|发改委|财政部|国家统计局|海关总署|商务部|工信部|农业农村部|住建部|水利部|国家粮食|中储粮|中储棉|国家能源局|中国人民银行|人民银行|央行逆回购|上期所|大商所|郑商所|中金所|广期所|甘其毛都|策克口岸|满都拉口岸|蒙煤|内蒙古|山西|山东|唐山|河北|河南|新疆|黑龙江|吉林|辽宁|江苏|浙江|安徽|江西|福建|湖北|湖南|广东|广西|四川|重庆|贵州|云南|陕西|甘肃|宁夏|青海|西藏|海南|天津|上海|北京|青岛港|日照港|CN\b|China\b/.test(value)) return 'domestic';
   if (/美国|美联储|美债|欧洲|欧盟|英国|日本|韩国|加拿大|澳大利亚|新西兰|巴西|阿根廷|俄罗斯|乌克兰|伊朗|中东|沙特|苏伊士|霍尔木兹|红海|OPEC|欧佩克|LME|芝加哥/.test(value)) return 'international';
   return 'other';
 }
@@ -264,6 +304,32 @@ function selectCoverage(ranked, limit = 20) {
     reserved.add(item);
   }
   return ranked.filter((item) => reserved.has(item)).slice(0, size);
+}
+function diagnoseFeed(entries) {
+  const bySource = {};
+  for (const entry of entries) {
+    if (!entry || !Object.hasOwn(VERIFIED_LABELS, entry.source)) continue;
+    const row = bySource[entry.source] ||= { source: entry.source, raw: 0, rejectedShort: 0, shortCandidates: 0, rejectedRelevanceOrTape: 0, accepted: 0, domestic: 0, international: 0, other: 0 };
+    row.raw++;
+    if (!qualifiesArticleLength(entry.item) && !qualifiesShortCandidate(entry.item)) { row.rejectedShort++; continue; }
+    if (qualifiesShortCandidate(entry.item)) row.shortCandidates++;
+    const normalized = normalizeItem(entry.item, { spider: entry.source, label: VERIFIED_LABELS[entry.source], grade: 'B类·已核验' }, row.raw);
+    if (!normalized) { row.rejectedRelevanceOrTape++; continue; }
+    row.accepted++; row[normalized.scope]++;
+  }
+  return Object.values(bySource);
+}
+async function scoreCandidatePool(items) {
+  const batches = [];
+  for (let i = 0; i < items.length; i += 20) batches.push(items.slice(i, i + 20));
+  const results = await Promise.all(batches.map(batch => scoreHotspots(batch)));
+  const scored = results.flatMap(result => result.items).sort((a, b) => b.score - a.score || Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0));
+  const count = scored.filter(item => item.scoringMethod === 'MODEL').length;
+  const admitted = scored.filter(item => !item.shortNotice || (item.scoringMethod === 'MODEL' && item.scoring.importance >= 30 && item.scoring.futuresRelevance >= 6));
+  return { items: selectCoverage(admitted), status: !scored.length ? 'SKIPPED_EMPTY' : count === scored.length ? 'SCORED' : count ? 'PARTIALLY_SCORED' : 'RULE_FALLBACK',
+    provider: [...new Set(results.map(row => row.provider).filter(Boolean))].join(' / '),
+    model: [...new Set(results.map(row => row.model).filter(Boolean))].join(' / '), scoredCandidates: count,
+    shortCandidates: scored.filter(item => item.shortNotice).length, shortAdmitted: admitted.filter(item => item.shortNotice).length };
 }
 async function runSource(baseUrl, headers, source) {
   const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 25000);
@@ -312,15 +378,17 @@ module.exports = async (req, res) => {
     if (!feed || !Array.isArray(feed.items)) return send(res, 503, { error: 'OMNIDATA_CACHE_EMPTY' });
     const admitted = feed.items.filter((entry) => entry && Object.hasOwn(VERIFIED_LABELS, entry.source));
     const longEnough = admitted.filter((entry) => qualifiesArticleLength(entry.item));
-    const collected = longEnough.map((entry, index) => normalizeItem(
+    const textCandidates = admitted.filter(entry => qualifiesArticleLength(entry.item) || qualifiesShortCandidate(entry.item));
+    const collected = textCandidates.map((entry, index) => normalizeItem(
       entry.item,
       { spider: entry.source, label: VERIFIED_LABELS[entry.source] || entry.source, grade: 'B类·已核验' },
       index,
     )).filter(Boolean);
-    const clustered = clusterItems(collected);
+    const allClusters = clusterItems(collected, null);
+    const clustered = selectCoverage(allClusters.filter(item => !item.shortNotice));
     let analysis = { items: clustered.map(item => ({ ...item, scoringMethod: 'RULE_PENDING' })), status: process.env.MINIMAX_API_KEY || process.env.DEEPSEEK_API_KEY ? 'PENDING' : 'MINIMAX_NOT_CONFIGURED' };
     if (req.query?.analysis === '1' || new URL(req.url || '/', 'http://localhost').searchParams.get('analysis') === '1') {
-      analysis = await scoreHotspots(clustered);
+      analysis = await scoreCandidatePool(selectCoverage(allClusters, 60));
     }
     const statuses = (Array.isArray(feed.sourceStatus) ? feed.sourceStatus : []).map((row) => ({
       spider: row.source, label: VERIFIED_LABELS[row.source] || row.source,
@@ -339,8 +407,14 @@ module.exports = async (req, res) => {
       stale, tradingDate: Boolean(feed.tradingDate && sameShanghaiDate),
       source: `服务器缓存：${Object.keys(VERIFIED_LABELS).length} 个准入信源，${statuses.filter((status) => status.ok).length} 个采集正常`,
       pipeline: {
-        collected: collected.length, rejected: feed.items.length - collected.length, rejectedShort: admitted.length - longEnough.length,
-        minArticleChars: MIN_ARTICLE_CHARS, clustered: clustered.length,
+        collected: collected.length, rejected: feed.items.length - collected.length, rejectedShort: admitted.length - textCandidates.length,
+        below130: admitted.length - longEnough.length, shortCandidates: collected.filter(item => item.shortNotice).length,
+        shortAdmitted: analysis.shortAdmitted || 0,
+        raw: feed.items.length, admitted: admitted.length,
+        minArticleChars: MIN_ARTICLE_CHARS, clustered: allClusters.length, displayed: analysis.items.length,
+        modelCandidateLimit: 60, modelScoredCandidates: analysis.scoredCandidates || 0,
+        sourceBreakdown: diagnoseFeed(feed.items),
+        coverageWarning: !collected.some(item => item.scope === 'domestic') ? 'NO_QUALIFIED_DOMESTIC_REPORTS' : !collected.some(item => item.scope === 'international') ? 'NO_QUALIFIED_INTERNATIONAL_REPORTS' : null,
         domesticCandidates: collected.filter((item) => item.scope === 'domestic').length,
         internationalCandidates: collected.filter((item) => item.scope === 'international').length,
         supplyChainCandidates: collected.filter((item) => item.supplyChain).length,
@@ -365,4 +439,4 @@ module.exports = async (req, res) => {
 };
 
 // Pure helpers are exposed for regression tests; this does not create an API route.
-module.exports._test = { normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, sameEvidence, clusterItems, score, newsScope, selectCoverage };
+module.exports._test = { normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, qualifiesShortCandidate, sameEvidence, clusterItems, score, newsScope, selectCoverage, diagnoseFeed, isArticleIdentity, scoreCandidatePool };
