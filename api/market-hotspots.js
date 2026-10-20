@@ -1,5 +1,6 @@
 const { currentProfile, send, supabase } = require('./_supabase');
 const { scoreHotspots } = require('./_hotspot-scoring');
+const { evaluateSnapshot, getCompletedEvaluation } = require('./_model-news');
 
 // Reuse existing server-only model credentials. Scoring never changes source facts.
 
@@ -193,6 +194,18 @@ function normalizeItem(item, source, index) {
     articleChars: articleCharacterCount(item), shortNotice: !qualifiesArticleLength(item),
   };
 }
+function prepareModelItem(entry, index) {
+  if (!entry?.item || typeof entry.item !== 'object') return null;
+  const item=entry.item,fields=articleFields(item),summary=fields.sort((a,b)=>b.length-a.length)[0]||'';
+  const originalTitle=text([item.title,item.news_title,item.newsTitle,item.name].find(value=>typeof value==='string'&&value.trim())||summary);
+  if (!originalTitle && !summary) return null; // Only discard records without text.
+  const title=conciseHeadline(originalTitle),body=summary.slice(0,1200),source=VERIFIED_LABELS[entry.source]||entry.source;
+  const publishedAt=normalizeDate(item.pub_time||item.publish_time||item.publishTime||item.published_at||item.publishedAt||item.time||item.datetime||item.date);
+  const sourceUrl=articleUrl(item,{spider:entry.source});
+  return {id:`raw-${index}`,title,summary:body||title,summaryType:body&&body!==title?'SOURCE_EXCERPT':'TITLE_ONLY',
+    source,spider:entry.source,sourceUrl,publishedAt,grade:'B类·已核验',contracts:[],articleChars:articleCharacterCount(item),
+    sources:[{name:source,url:sourceUrl,publishedAt,grade:'B类·已核验',title,excerpt:body.slice(0,500)}]};
+}
 // \W is ASCII-only in JavaScript and silently discards Chinese titles.
 function titleKey(value) { return text(value).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '').slice(0, 120); }
 function pairOverlap(a, b) {
@@ -377,18 +390,12 @@ module.exports = async (req, res) => {
     const feed = Array.isArray(snapshots) ? snapshots[0]?.payload?.data : null;
     if (!feed || !Array.isArray(feed.items)) return send(res, 503, { error: 'OMNIDATA_CACHE_EMPTY' });
     const admitted = feed.items.filter((entry) => entry && Object.hasOwn(VERIFIED_LABELS, entry.source));
-    const longEnough = admitted.filter((entry) => qualifiesArticleLength(entry.item));
-    const textCandidates = admitted.filter(entry => qualifiesArticleLength(entry.item) || qualifiesShortCandidate(entry.item));
-    const collected = textCandidates.map((entry, index) => normalizeItem(
-      entry.item,
-      { spider: entry.source, label: VERIFIED_LABELS[entry.source] || entry.source, grade: 'B类·已核验' },
-      index,
-    )).filter(Boolean);
-    const allClusters = clusterItems(collected, null);
-    const clustered = selectCoverage(allClusters.filter(item => !item.shortNotice));
-    let analysis = { items: clustered.map(item => ({ ...item, scoringMethod: 'RULE_PENDING' })), status: process.env.MINIMAX_API_KEY || process.env.DEEPSEEK_API_KEY ? 'PENDING' : 'MINIMAX_NOT_CONFIGURED' };
+    // No length, keyword, price-tape or rule-score admission is applied here.
+    // Every nonempty approved-source record is submitted to the model.
+    const collected = admitted.map(prepareModelItem).filter(Boolean);
+    let analysis = getCompletedEvaluation(collected)||{items:[],status:process.env.MINIMAX_API_KEY||process.env.DEEPSEEK_API_KEY?'PENDING':'MODEL_UNAVAILABLE'};
     if (req.query?.analysis === '1' || new URL(req.url || '/', 'http://localhost').searchParams.get('analysis') === '1') {
-      analysis = await scoreCandidatePool(selectCoverage(allClusters, 60));
+      analysis = await evaluateSnapshot(collected);
     }
     const statuses = (Array.isArray(feed.sourceStatus) ? feed.sourceStatus : []).map((row) => ({
       spider: row.source, label: VERIFIED_LABELS[row.source] || row.source,
@@ -407,17 +414,15 @@ module.exports = async (req, res) => {
       stale, tradingDate: Boolean(feed.tradingDate && sameShanghaiDate),
       source: `服务器缓存：${Object.keys(VERIFIED_LABELS).length} 个准入信源，${statuses.filter((status) => status.ok).length} 个采集正常`,
       pipeline: {
-        collected: collected.length, rejected: feed.items.length - collected.length, rejectedShort: admitted.length - textCandidates.length,
-        below130: admitted.length - longEnough.length, shortCandidates: collected.filter(item => item.shortNotice).length,
-        shortAdmitted: analysis.shortAdmitted || 0,
+        mode:'MODEL_ONLY',collected:collected.length,rejected:analysis.stats?.rejected||0,rejectedShort:0,
+        invalidEmpty:admitted.length-collected.length,below130:collected.filter(item=>item.articleChars<130).length,
+        shortAdmitted:analysis.items.filter(item=>item.shortNotice).length,
         raw: feed.items.length, admitted: admitted.length,
-        minArticleChars: MIN_ARTICLE_CHARS, clustered: allClusters.length, displayed: analysis.items.length,
-        modelCandidateLimit: 60, modelScoredCandidates: analysis.scoredCandidates || 0,
-        sourceBreakdown: diagnoseFeed(feed.items),
-        coverageWarning: !collected.some(item => item.scope === 'domestic') ? 'NO_QUALIFIED_DOMESTIC_REPORTS' : !collected.some(item => item.scope === 'international') ? 'NO_QUALIFIED_INTERNATIONAL_REPORTS' : null,
-        domesticCandidates: collected.filter((item) => item.scope === 'domestic').length,
-        internationalCandidates: collected.filter((item) => item.scope === 'international').length,
-        supplyChainCandidates: collected.filter((item) => item.supplyChain).length,
+        minArticleChars:null,clustered:analysis.stats?.events||0,displayed:analysis.items.length,
+        modelCandidateLimit:null,modelScoredCandidates:analysis.stats?.evaluated||0,
+        modelStats:analysis.stats||null,
+        sourceBreakdown:Object.keys(VERIFIED_LABELS).map(source=>({source,raw:admitted.filter(entry=>entry.source===source).length,submitted:collected.filter(item=>item.spider===source).length})),
+        coverageWarning:analysis.status==='PENDING'?null:analysis.items.length<20?'INSUFFICIENT_MODEL_APPROVED_NEWS':null,
         domesticDisplayed: analysis.items.filter((item) => item.scope === 'domestic').length,
         internationalDisplayed: analysis.items.filter((item) => item.scope === 'international').length,
         minSources: 1, maxSources: 3,
@@ -425,7 +430,7 @@ module.exports = async (req, res) => {
         sourcesSucceeded: statuses.filter((status) => status.ok).length,
         configured: true,
       },
-      ai: { status: analysis.status, model: analysis.model || null, provider: analysis.provider || null },
+      ai: {status:analysis.status,model:analysis.model||null,provider:analysis.provider||null,failures:analysis.failures||[]},
       sourceStatus: statuses,
     });
   } catch (error) {
@@ -439,4 +444,4 @@ module.exports = async (req, res) => {
 };
 
 // Pure helpers are exposed for regression tests; this does not create an API route.
-module.exports._test = { normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, qualifiesShortCandidate, sameEvidence, clusterItems, score, newsScope, selectCoverage, diagnoseFeed, isArticleIdentity, scoreCandidatePool };
+module.exports._test = { prepareModelItem, normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, qualifiesShortCandidate, sameEvidence, clusterItems, score, newsScope, selectCoverage, diagnoseFeed, isArticleIdentity, scoreCandidatePool };

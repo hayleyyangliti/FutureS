@@ -1,5 +1,7 @@
 # Hotspot model scoring
 
+Historical implementation notes. The current production route is superseded by [MODEL_ONLY_NEWS.md](MODEL_ONLY_NEWS.md); rule helpers remain only for regression comparison and are not used for production admission or fallback.
+
 This temporary stage retains four weights (importance 45, timeliness 25, information gain 20, futures relevance 10) and 1–3 sources. Standard reports require 130 substantive characters. The user-approved high-importance short-notice exception admits substantive policy/supply-event candidates of at least 12 characters only when actual model scores reach importance 30/45 and futures relevance 6/10. Rule fallback never admits these short notices. Pure price tape remains excluded, and short notices are visibly labelled with original character count. It scores up to 60 clustered candidates in batches of 20 before final Top 20 selection. Up to five domestic and five international slots are reserved when qualified candidates exist, with the final display sorted by total score. It does not invent absent reports or score the entire raw feed.
 
 The authenticated analysis request sends original facts and up to three source excerpts to MiniMax first, then DeepSeek on timeout, HTTP failure, invalid/missing/duplicate IDs, invalid scores/reasons or unsupported evidence. Server-only existing credentials are reused. No browser keys or changes to Supabase privileges/schema are needed.

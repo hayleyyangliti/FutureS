@@ -203,7 +203,7 @@
   function renderScoringReasons(items){
     items.forEach((item,index)=>{const card=feedCards[index];if(!card)return;
       const block=document.createElement('div');block.className='detail-block scoring-explanation';
-      if(item.shortNotice){const notice=document.createElement('span');notice.className='source-grade';notice.textContent=`高重要性短讯 · 原文${item.articleChars||0}字`;card.querySelector('.feed-meta').append(notice);card.querySelector('.detail-block h4').textContent='原始短讯（模型确认高重要性）'}
+      if(item.shortNotice){const notice=document.createElement('span');notice.className='source-grade';notice.textContent=`短讯 · 原文${item.articleChars||0}字`;card.querySelector('.feed-meta').append(notice);card.querySelector('.detail-block h4').textContent='原始短讯（模型准入）'}
       const heading=document.createElement('h4');heading.textContent=item.scoringMethod==='MODEL'?`模型评分 · ${item.scoringProvider} / ${item.scoringModel}`:'规则暂评 · 尚未获得有效模型评分';block.append(heading);
       const labels={importance:'重要性',timeliness:'时效性',informationGain:'信息增量',futuresRelevance:'期货相关性'};
       Object.entries(item.scoringReasons||{}).forEach(([key,value])=>{const p=document.createElement('p');p.textContent=`${labels[key]||key}：${value}`;block.append(p)});
@@ -214,8 +214,36 @@
     });
   }
   let currentHotspotSnapshot='';
-  async function loadHotspotAnalysis(token,snapshot){try{const response=await fetch('/api/market-hotspots?analysis=1',{headers:{Authorization:`Bearer ${token}`}});if(!response.ok)return;const payload=await response.json();if(currentHotspotSnapshot!==snapshot||payload.refreshedAt!==snapshot||!['SCORED','PARTIALLY_SCORED','RULE_FALLBACK'].includes(payload.ai?.status))return;renderHotspotItems(payload.items||[]);renderSourceMonitoring(payload)}catch(error){console.warn('Hotspot scoring unavailable',error.name)}}
-refreshBtn.addEventListener('click',async()=>{if(refreshBtn.disabled)return;const token=localStorage.getItem('futures-content-engine:access-token');if(!token){openLogin();return}setBusy(refreshBtn,true,'正在读取服务器已保存的资讯…');try{const response=await fetch('/api/market-hotspots',{headers:{Authorization:`Bearer ${token}`}});const payload=await response.json();if(!response.ok)throw new Error(payload.error||'MARKET_HOTSPOTS_UNAVAILABLE');renderHotspotItems(payload.items||[]);currentHotspotSnapshot=payload.refreshedAt||'';renderSourceMonitoring(payload);const updated=payload.refreshedAt?new Date(payload.refreshedAt):null;lastRefresh.textContent=updated&&!Number.isNaN(updated.getTime())?'数据更新于 '+updated.toLocaleString('zh-CN',{hour12:false}):'暂无已保存数据';const pipeline=payload.pipeline||{};toast(`已读取 ${pipeline.collected||0} 条已保存资讯，展示 ${payload.items?.length||0} 个热点${payload.stale?'；数据可能过期，等待后端更新':''}`);if(payload.ai?.status==='PENDING')void loadHotspotAnalysis(token,currentHotspotSnapshot)}catch(error){toast(error.message==='UNAUTHORIZED'?'登录状态已失效，请重新登录':'热点缓存暂时不可用，请稍后重试')}finally{setBusy(refreshBtn,false);}});
+  async function loadHotspotAnalysis(token,snapshot){
+    const response=await fetch('/api/market-hotspots?analysis=1',{headers:{Authorization:`Bearer ${token}`}});
+    if(!response.ok)throw new Error('MODEL_REQUEST_FAILED');
+    const payload=await response.json();
+    if(currentHotspotSnapshot!==snapshot||payload.refreshedAt!==snapshot)throw new Error('SNAPSHOT_CHANGED');
+    renderSourceMonitoring(payload);
+    if(payload.ai?.status==='MODEL_UNAVAILABLE')throw new Error('MODEL_UNAVAILABLE');
+    renderHotspotItems(payload.items||[]);
+    return payload;
+  }
+refreshBtn.addEventListener('click',async()=>{
+    if(refreshBtn.disabled)return;
+    const token=localStorage.getItem('futures-content-engine:access-token');if(!token){openLogin();return}
+    setBusy(refreshBtn,true,'读取资讯…');
+    try{
+      const response=await fetch('/api/market-hotspots',{headers:{Authorization:`Bearer ${token}`}});
+      const payload=await response.json();if(!response.ok)throw new Error(payload.error||'UNAVAILABLE');
+      currentHotspotSnapshot=payload.refreshedAt||'';renderSourceMonitoring(payload);renderHotspotItems(payload.items||[]);
+      const updated=new Date(payload.refreshedAt||'');lastRefresh.textContent=Number.isNaN(updated.getTime())?'暂无已保存数据':'数据更新于 '+updated.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
+      if(payload.ai?.status==='MODEL_UNAVAILABLE')throw new Error('MODEL_UNAVAILABLE');
+      setBusy(refreshBtn,true,'模型筛选中…');
+      if(!feedCards.length){emptyState.querySelector('b').textContent='模型正在筛选资讯';emptyState.querySelector('p').textContent='正在逐批判断原始资讯，请等待模型完成。'}
+      const result=await loadHotspotAnalysis(token,currentHotspotSnapshot);
+      toast(result.ai?.status==='PARTIALLY_SCORED'?'部分模型批次失败，请在智能后台查看；当前仅展示有效模型结果':'模型筛选与评分已完成');
+    }catch(error){
+      const message=error.message==='MODEL_UNAVAILABLE'?'模型评分暂不可用，请在智能后台查看失败原因，不使用规则结果替代':error.message==='SNAPSHOT_CHANGED'?'筛选期间资讯快照已更新，请重新刷新':error.message==='UNAUTHORIZED'?'登录已失效，请重新登录':'模型筛选请求未完成，请稍后重试';
+      toast(message);
+      if(!feedCards.length){emptyState.style.display='block';emptyState.querySelector('b').textContent='模型筛选未完成';emptyState.querySelector('p').textContent=message;}
+    }finally{setBusy(refreshBtn,false);}
+  });
   document.querySelectorAll('.page-link').forEach(link=>link.addEventListener('click',()=>{document.querySelectorAll('.page-link').forEach(x=>x.classList.remove('active'));link.classList.add('active');document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));document.getElementById(link.dataset.target).classList.add('active')}));
   const supplementalHotspots=[
     ['绿色金融及新能源',66,'新能源产业政策释放新信号，相关原材料需求预期受到关注',['碳酸锂','工业硅'],'A类信源','8小时10分',[28,14,16,8]],
@@ -737,17 +765,13 @@ eyJQdXNoIMK3IOeDreeCuemAn+mAkiI6eyJjYXRlZ29yeSI6IlB1c2giLCJzY2VuZSI6IueDreeCuemA
   caseTableBody.addEventListener('click',event=>{const button=event.target.closest('[data-case-action="move"]');if(!button)return;const record=caseRecords.find(item=>item.id===Number(button.closest('tr').dataset.caseId));if(!record)return;openFolderPicker({title:'移动案例',library:record.library,currentPath:record.folder,includeUnfiled:true,onConfirm:target=>{record.folder=target;renderCases();updateMonitorCaseSelect();toast(`案例已移动至${target}`)}})});
   /* 演示账号与角色：正式部署时应由后端、加密密码和企业 SSO 替换。 */
 function renderSourceMonitoring(payload){
-    const list=document.getElementById('apiList'),rows=Array.isArray(payload.sourceStatus)?payload.sourceStatus:[];
-    const p=payload.pipeline||{},stages=Array.isArray(p.sourceBreakdown)?p.sourceBreakdown:[];
-    const stats=`快照 ${p.raw??'—'} 条 · 130字不足淘汰 ${p.rejectedShort??'—'} 条 · 短讯候选 ${p.shortCandidates||0} / 模型准入 ${p.shortAdmitted||0} · 相关资讯 ${p.collected??'—'} 条 · 合并后 ${p.clustered??'—'} 个事件 · 展示 ${payload.items?.length||0} 条（国内 ${p.domesticDisplayed||0} / 国外 ${p.internationalDisplayed||0} / 未明确地区 ${(payload.items?.length||0)-(p.domesticDisplayed||0)-(p.internationalDisplayed||0)}）`;
-    let coverage=document.getElementById('hotspotCoverageStats');if(!coverage){coverage=document.createElement('p');coverage.id='hotspotCoverageStats';coverage.style.cssText='font-size:12px;color:#60758b;margin-top:8px';document.getElementById('lastRefresh')?.parentElement?.append(coverage)}coverage.textContent=stats;
-    const warning=p.coverageWarning==='NO_QUALIFIED_DOMESTIC_REPORTS'?'本轮没有通过130字及相关性标准的国内报道；请查看各信源淘汰数量。':p.coverageWarning==='NO_QUALIFIED_INTERNATIONAL_REPORTS'?'本轮没有通过标准的国外报道；不以虚构内容补位。':'';
-    const summary=`<div class="monitor-summary"><span class="state-pill">已检测 ${rows.length} 个信源</span><small>正常 ${rows.filter(x=>x.ok).length} 个 · 异常 ${rows.filter(x=>!x.ok).length} 个</small></div><p>${escapeHtml(stats)}</p>${warning?`<p class="monitor-alert">${escapeHtml(warning)}</p>`:''}`;
-    list.innerHTML=summary+rows.map(source=>{
-      const stage=stages.find(row=>row.source===source.spider),ok=Boolean(source.ok),date=new Date(source.checkedAt||payload.refreshedAt);
-      const time=Number.isNaN(date.getTime())?'未知':date.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
-      const detail=stage?`快照${stage.raw}条 → 字数不足${stage.rejectedShort}条 / 相关性或行情淘汰${stage.rejectedRelevanceOrTape}条 → 合格${stage.accepted}条（国内${stage.domestic} / 国外${stage.international} / 未明确${stage.other}）`:'等待筛选统计';
-      return `<div class="admin-row api-row"><span><b>${escapeHtml(source.label||source.spider||'未命名信源')}</b><small>${escapeHtml(source.spider||'')}</small></span><span class="state-pill ${ok?'':'off'}">${ok?'采集正常':'采集失败'}</span><span><small>检测时间：${escapeHtml(time)}</small><small>${ok?`本次采集：${Number(source.count)||0}条`:escapeHtml(source.reason||'采集失败')}</small><small>${escapeHtml(detail)}</small></span><span>${ok?'已同步':'待排查'}</span></div>`;
+    const list=document.getElementById('apiList'),rows=Array.isArray(payload.sourceStatus)?payload.sourceStatus:[],p=payload.pipeline||{},model=p.modelStats||{};
+    const stats=`模型全量判断 · 快照 ${p.raw??'—'} 条 · 已提交 ${p.collected??'—'} 条 · 已判断 ${model.evaluated||0} 条 · 模型纳入 ${model.approved||0} 条 / 排除 ${model.rejected||0} 条 · 判断失败 ${model.failed||0} 条 · 合并后 ${model.events||0} 个事件`;
+    const status=payload.ai?.status==='PENDING'?'等待模型筛选':payload.ai?.status==='MODEL_UNAVAILABLE'?'模型不可用，不回退规则评分':payload.ai?.status==='PARTIALLY_SCORED'?'部分批次失败，仅展示已获得模型判断的资讯':'模型筛选已完成';
+    const failureText=[...new Set((payload.ai?.failures||[]).map(row=>`${row.provider}: ${row.code}`))].join('；');
+    list.innerHTML=`<div class="monitor-summary"><span class="state-pill">模型筛选，无规则初筛</span><small>${escapeHtml(status)}</small></div><p>${escapeHtml(stats)}</p>${failureText?`<p class="monitor-alert">${escapeHtml(failureText)}</p>`:''}`+rows.map(source=>{
+      const stage=(p.sourceBreakdown||[]).find(row=>row.source===source.spider),ok=Boolean(source.ok),date=new Date(source.checkedAt||payload.refreshedAt),time=Number.isNaN(date.getTime())?'未知':date.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
+      return `<div class="admin-row api-row"><span><b>${escapeHtml(source.label||source.spider||'未命名信源')}</b><small>${escapeHtml(source.spider||'')}</small></span><span class="state-pill ${ok?'':'off'}">${ok?'采集正常':'采集失败'}</span><span><small>检测时间：${escapeHtml(time)}</small><small>${ok?`本次采集：${Number(source.count)||0}条`:escapeHtml(source.reason||'采集失败')}</small><small>${stage?`快照${stage.raw}条，进入模型${stage.submitted}条`:'暂无快照'}</small></span><span>${ok?'已同步':'待排查'}</span></div>`;
     }).join('');
   }
   document.getElementById('refreshApi').onclick=async function(){
