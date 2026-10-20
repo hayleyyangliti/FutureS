@@ -98,7 +98,7 @@ function aggregate(items, batches) {
     const sources=[...new Map(group.flatMap(item=>item.sources).map(source=>[source.name,source])).values()].slice(0,3);
     const publishedAt=group.map(item=>item.publishedAt).filter(value=>Number.isFinite(Date.parse(value))).sort()[0]||primary.publishedAt;
     const scoring={...primary.scoring,timeliness:timeScore(publishedAt)};scoring.total=scoring.importance+scoring.timeliness+scoring.informationGain+scoring.futuresRelevance;
-    return {...primary,sources,publishedAt,scoring,score:scoring.total,duplicateCount:group.length-1,shortNotice:group.every(item=>item.shortNotice)};
+    return {...primary,sources,publishedAt,scoring,score:scoring.total,reports:group.map(item=>({source:item.source,summary:item.summary})),mergedReports:group.length,duplicateCount:group.length-1,shortNotice:group.every(item=>item.shortNotice)};
   }).sort((a,b)=>b.score-a.score||Date.parse(b.publishedAt||0)-Date.parse(a.publishedAt||0));
   const displayed=selectEvents(events);
   return {items:displayed,status:failed.length?(approved.length||rejected.length?'PARTIALLY_SCORED':'MODEL_UNAVAILABLE'):'SCORED',

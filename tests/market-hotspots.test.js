@@ -190,6 +190,7 @@ test('unscored feed retains all nonempty texts as model candidates without rule 
   Object.assign(process.env, { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_ANON_KEY: 'public-test', SUPABASE_SERVICE_ROLE_KEY: 'server-test' });
   delete process.env.MINIMAX_API_KEY;
   global.fetch = async (url) => {
+    if (String(url).includes('/omnidata_hotspot_rankings?')) return {ok:true,text:async()=> '[]'};
     if (String(url).endsWith('/rpc/current_profile')) return { ok: true, json: async () => [{ auth_user_id: 'test-user' }] };
     return { ok: true, text: async () => JSON.stringify([{ updated_at: new Date().toISOString(), payload: { data: {
       refreshedAt: new Date().toISOString(), tradingDate: true,
@@ -229,6 +230,7 @@ test('analysis scores without changing verified headline, original excerpt or so
   Object.assign(process.env, { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_ANON_KEY: 'public-test', SUPABASE_SERVICE_ROLE_KEY: 'server-test', MINIMAX_API_KEY: 'model-test' });
   const snapshot = '2026-10-16T11:00:00.000Z';
   global.fetch = async (url, options) => {
+    if (String(url).includes('/omnidata_hotspot_rankings?')) return {ok:true,text:async()=> '[]'};
     if (String(url).endsWith('/rpc/current_profile')) return { ok: true, json: async () => [{ auth_user_id: 'test-user' }] };
     if (String(url).includes('api.minimaxi.com')) return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ items: JSON.parse(JSON.parse(options.body).messages[1].content).items.map(item=>({ id:item.id,admit:true,scope:'international',category:'能源化工',eventKey:'中信建投油价展望',importance:22,informationGain:8,futuresRelevance:7,reasons:{importance:'机构观点，影响范围有限',informationGain:'有补充事实，非重复转载',futuresRelevance:'油价直接关联原油期货'},evidence:'油价' })) }) } }] }) };
     return { ok: true, text: async () => JSON.stringify([{ updated_at: snapshot, payload: { data: {

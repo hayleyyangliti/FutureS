@@ -202,15 +202,8 @@
   }
   function renderScoringReasons(items){
     items.forEach((item,index)=>{const card=feedCards[index];if(!card)return;
-      const block=document.createElement('div');block.className='detail-block scoring-explanation';
-      if(item.shortNotice){const notice=document.createElement('span');notice.className='source-grade';notice.textContent=`短讯 · 原文${item.articleChars||0}字`;card.querySelector('.feed-meta').append(notice);card.querySelector('.detail-block h4').textContent='原始短讯（模型准入）'}
-      const heading=document.createElement('h4');heading.textContent=item.scoringMethod==='MODEL'?`模型评分 · ${item.scoringProvider} / ${item.scoringModel}`:'规则暂评 · 尚未获得有效模型评分';block.append(heading);
-      const labels={importance:'重要性',timeliness:'时效性',informationGain:'信息增量',futuresRelevance:'期货相关性'};
-      Object.entries(item.scoringReasons||{}).forEach(([key,value])=>{const p=document.createElement('p');p.textContent=`${labels[key]||key}：${value}`;block.append(p)});
-      if(item.scoringEvidence){const p=document.createElement('p');p.textContent=`相关性原文依据：${item.scoringEvidence}`;block.append(p)}
-      card.querySelector('.feed-detail').append(block);
-      const label=item.scoringMethod==='MODEL'?`${item.scoringProvider}评分`:'规则暂评';card.querySelector('.score-box small').textContent=label;
-      const pop=card.querySelector('.score-pop');if(pop){const p=document.createElement('p');p.textContent=label;pop.append(p)}
+      if(item.shortNotice){const notice=document.createElement('span');notice.className='source-grade';notice.textContent='短讯';card.querySelector('.feed-meta').append(notice)}
+      if(item.summaryType==='SOURCE_SYNTHESIS')card.querySelector('.detail-block h4').textContent='综合报道摘要';
     });
   }
   let currentHotspotSnapshot='';
@@ -234,6 +227,7 @@ refreshBtn.addEventListener('click',async()=>{
       currentHotspotSnapshot=payload.refreshedAt||'';renderSourceMonitoring(payload);renderHotspotItems(payload.items||[]);
       const updated=new Date(payload.refreshedAt||'');lastRefresh.textContent=Number.isNaN(updated.getTime())?'暂无已保存数据':'数据更新于 '+updated.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
       if(payload.ai?.status==='MODEL_UNAVAILABLE')throw new Error('MODEL_UNAVAILABLE');
+      if(payload.pipeline?.mode==='BACKGROUND_RANKING'){toast(payload.stale?'已显示最近完成的榜单，后台正在更新':'已读取最新热点排名');return;}
       setBusy(refreshBtn,true,'模型筛选中…');
       if(!feedCards.length){emptyState.querySelector('b').textContent='模型正在筛选资讯';emptyState.querySelector('p').textContent='正在逐批判断原始资讯，请等待模型完成。'}
       const result=await loadHotspotAnalysis(token,currentHotspotSnapshot);

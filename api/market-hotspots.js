@@ -1,6 +1,7 @@
 const { currentProfile, send, supabase } = require('./_supabase');
 const { scoreHotspots } = require('./_hotspot-scoring');
 const { evaluateSnapshot, getCompletedEvaluation } = require('./_model-news');
+const { readRanking, rankingResponse } = require('./_rank-store');
 
 // Reuse existing server-only model credentials. Scoring never changes source facts.
 
@@ -384,6 +385,8 @@ module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'private, no-store');
   try {
     await currentProfile(req);
+    const ready=await readRanking();
+    if(ready)return send(res,200,rankingResponse(ready));
     // The ECS pushes its completed snapshot to Supabase. A browser refresh only
     // reads this saved copy; it never contacts the ECS or starts a spider.
     const snapshots = await supabase('/rest/v1/omnidata_news_snapshots?select=payload,updated_at&id=eq.current&limit=1');
@@ -444,4 +447,4 @@ module.exports = async (req, res) => {
 };
 
 // Pure helpers are exposed for regression tests; this does not create an API route.
-module.exports._test = { prepareModelItem, normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, qualifiesShortCandidate, sameEvidence, clusterItems, score, newsScope, selectCoverage, diagnoseFeed, isArticleIdentity, scoreCandidatePool };
+module.exports._test = { VERIFIED_LABELS, prepareModelItem, normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, qualifiesShortCandidate, sameEvidence, clusterItems, score, newsScope, selectCoverage, diagnoseFeed, isArticleIdentity, scoreCandidatePool };
