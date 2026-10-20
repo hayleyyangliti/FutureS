@@ -184,7 +184,7 @@ test('short shared speaker lead merges different central-bank remarks in one ses
   assert.equal(sameSpeakerLead(titles[0], '美国央行官员：讨论美元政策'), false);
 });
 
-test('cached feed responds with deduplicated, ranked items and source provenance', async () => {
+test('unscored feed retains all nonempty texts as model candidates without rule results', async () => {
   const previousFetch = global.fetch;
   const previousEnv = Object.fromEntries(['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'MINIMAX_API_KEY'].map((key) => [key, process.env[key]]));
   Object.assign(process.env, { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_ANON_KEY: 'public-test', SUPABASE_SERVICE_ROLE_KEY: 'server-test' });
@@ -208,14 +208,15 @@ test('cached feed responds with deduplicated, ranked items and source provenance
   try {
     await handler({ method: 'GET', headers: { authorization: 'Bearer test' }, url: '/api/market-hotspots' }, response);
     assert.equal(response.code, 200);
-    assert.equal(response.body.items.length, 2);
-    assert.equal(response.body.pipeline.rejected, 2);
-    assert.equal(response.body.pipeline.rejectedShort, 1);
-    assert.equal(response.body.pipeline.minArticleChars, 130);
+    assert.equal(response.body.items.length, 0);
+    assert.equal(response.body.pipeline.collected, 5);
+    assert.equal(response.body.pipeline.rejected, 0);
+    assert.equal(response.body.pipeline.rejectedShort, 0);
+    assert.equal(response.body.pipeline.minArticleChars, null);
     assert.equal(response.body.pipeline.minSources, 1);
     assert.equal(response.body.pipeline.maxSources, 3);
     assert.ok(response.body.items.every((item) => item.score === item.scoring.total && item.sources.length >= 1 && item.sources.length <= 3));
-    assert.equal(response.body.ai.status, 'MINIMAX_NOT_CONFIGURED');
+    assert.equal(response.body.ai.status, 'MODEL_UNAVAILABLE');
   } finally {
     global.fetch = previousFetch;
     for (const [key, value] of Object.entries(previousEnv)) value === undefined ? delete process.env[key] : process.env[key] = value;
@@ -227,9 +228,9 @@ test('analysis scores without changing verified headline, original excerpt or so
   const previousEnv = Object.fromEntries(['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'MINIMAX_API_KEY'].map((key) => [key, process.env[key]]));
   Object.assign(process.env, { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_ANON_KEY: 'public-test', SUPABASE_SERVICE_ROLE_KEY: 'server-test', MINIMAX_API_KEY: 'model-test' });
   const snapshot = '2026-10-16T11:00:00.000Z';
-  global.fetch = async (url) => {
+  global.fetch = async (url, options) => {
     if (String(url).endsWith('/rpc/current_profile')) return { ok: true, json: async () => [{ auth_user_id: 'test-user' }] };
-    if (String(url).includes('api.minimaxi.com')) return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ items: [{ id: 'hotspot-1', importance: 22, informationGain: 8, futuresRelevance: 7, reasons: { importance: '机构观点，影响范围有限', informationGain: '有补充事实，非重复转载', futuresRelevance: '油价直接关联原油期货' }, evidence: '油价' }] }) } }] }) };
+    if (String(url).includes('api.minimaxi.com')) return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ items: JSON.parse(JSON.parse(options.body).messages[1].content).items.map(item=>({ id:item.id,admit:true,scope:'international',category:'能源化工',eventKey:'中信建投油价展望',importance:22,informationGain:8,futuresRelevance:7,reasons:{importance:'机构观点，影响范围有限',informationGain:'有补充事实，非重复转载',futuresRelevance:'油价直接关联原油期货'},evidence:'油价' })) }) } }] }) };
     return { ok: true, text: async () => JSON.stringify([{ updated_at: snapshot, payload: { data: {
       refreshedAt: snapshot, items: [
         { source: media.spider, item: { title: '中信建投：油价或维持区间波动', content: longArticle('中信建投认为油价或维持区间波动，相关研究同时讨论了产油国供给变化和全球需求前景。'), url: 'https://example.com/original', pub_time: '2026-10-16 10:30:00' } },
