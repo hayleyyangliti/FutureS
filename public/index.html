@@ -203,6 +203,7 @@
   function renderScoringReasons(items){
     items.forEach((item,index)=>{const card=feedCards[index];if(!card)return;
       const block=document.createElement('div');block.className='detail-block scoring-explanation';
+      if(item.shortNotice){const notice=document.createElement('span');notice.className='source-grade';notice.textContent=`高重要性短讯 · 原文${item.articleChars||0}字`;card.querySelector('.feed-meta').append(notice);card.querySelector('.detail-block h4').textContent='原始短讯（模型确认高重要性）'}
       const heading=document.createElement('h4');heading.textContent=item.scoringMethod==='MODEL'?`模型评分 · ${item.scoringProvider} / ${item.scoringModel}`:'规则暂评 · 尚未获得有效模型评分';block.append(heading);
       const labels={importance:'重要性',timeliness:'时效性',informationGain:'信息增量',futuresRelevance:'期货相关性'};
       Object.entries(item.scoringReasons||{}).forEach(([key,value])=>{const p=document.createElement('p');p.textContent=`${labels[key]||key}：${value}`;block.append(p)});
@@ -213,7 +214,7 @@
     });
   }
   let currentHotspotSnapshot='';
-  async function loadHotspotAnalysis(token,snapshot){try{const response=await fetch('/api/market-hotspots?analysis=1',{headers:{Authorization:`Bearer ${token}`}});if(!response.ok)return;const payload=await response.json();if(currentHotspotSnapshot!==snapshot||payload.refreshedAt!==snapshot||!['SCORED','RULE_FALLBACK'].includes(payload.ai?.status))return;renderHotspotItems(payload.items||[])}catch(error){console.warn('Hotspot scoring unavailable',error.name)}}
+  async function loadHotspotAnalysis(token,snapshot){try{const response=await fetch('/api/market-hotspots?analysis=1',{headers:{Authorization:`Bearer ${token}`}});if(!response.ok)return;const payload=await response.json();if(currentHotspotSnapshot!==snapshot||payload.refreshedAt!==snapshot||!['SCORED','PARTIALLY_SCORED','RULE_FALLBACK'].includes(payload.ai?.status))return;renderHotspotItems(payload.items||[]);renderSourceMonitoring(payload)}catch(error){console.warn('Hotspot scoring unavailable',error.name)}}
 refreshBtn.addEventListener('click',async()=>{if(refreshBtn.disabled)return;const token=localStorage.getItem('futures-content-engine:access-token');if(!token){openLogin();return}setBusy(refreshBtn,true,'正在读取服务器已保存的资讯…');try{const response=await fetch('/api/market-hotspots',{headers:{Authorization:`Bearer ${token}`}});const payload=await response.json();if(!response.ok)throw new Error(payload.error||'MARKET_HOTSPOTS_UNAVAILABLE');renderHotspotItems(payload.items||[]);currentHotspotSnapshot=payload.refreshedAt||'';renderSourceMonitoring(payload);const updated=payload.refreshedAt?new Date(payload.refreshedAt):null;lastRefresh.textContent=updated&&!Number.isNaN(updated.getTime())?'数据更新于 '+updated.toLocaleString('zh-CN',{hour12:false}):'暂无已保存数据';const pipeline=payload.pipeline||{};toast(`已读取 ${pipeline.collected||0} 条已保存资讯，展示 ${payload.items?.length||0} 个热点${payload.stale?'；数据可能过期，等待后端更新':''}`);if(payload.ai?.status==='PENDING')void loadHotspotAnalysis(token,currentHotspotSnapshot)}catch(error){toast(error.message==='UNAUTHORIZED'?'登录状态已失效，请重新登录':'热点缓存暂时不可用，请稍后重试')}finally{setBusy(refreshBtn,false);}});
   document.querySelectorAll('.page-link').forEach(link=>link.addEventListener('click',()=>{document.querySelectorAll('.page-link').forEach(x=>x.classList.remove('active'));link.classList.add('active');document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));document.getElementById(link.dataset.target).classList.add('active')}));
   const supplementalHotspots=[
@@ -737,11 +738,17 @@ eyJQdXNoIMK3IOeDreeCuemAn+mAkiI6eyJjYXRlZ29yeSI6IlB1c2giLCJzY2VuZSI6IueDreeCuemA
   /* 演示账号与角色：正式部署时应由后端、加密密码和企业 SSO 替换。 */
 function renderSourceMonitoring(payload){
     const list=document.getElementById('apiList'),rows=Array.isArray(payload.sourceStatus)?payload.sourceStatus:[];
-    const checkedAt=value=>{if(!value)return'检测时间未知';const date=new Date(value);return Number.isNaN(date.getTime())?'检测时间未知':date.toLocaleString('zh-CN',{hour12:false})};
-    if(!rows.length){list.innerHTML='<div class="coming-note">尚未检测资讯来源。请点击“检测连接”，或在刷新热点后查看同步结果。</div>';return}
-    const normal=rows.filter(source=>source.ok).length,failed=rows.length-normal;
-    const summary=`<div class="monitor-summary"><span class="state-pill">已检测 ${rows.length} 个信源</span><small>正常 ${normal} 个${failed?` · 异常 ${failed} 个`:''}</small><small>显示阿里云上次定时采集结果</small></div>`;
-    list.innerHTML=summary+rows.map(source=>{const ok=Boolean(source.ok),time=checkedAt(source.checkedAt||source.detectedAt||source.refreshedAt||payload.refreshedAt),count=Number(source.count||0),reason=source.reason||source.error||'无法连接 Omnidata 或该信源暂不可用';return `<div class="admin-row api-row"><span><b>${escapeHtml(source.label||source.spider||'未命名信源')}</b><small>${escapeHtml(source.spider||'爬虫标识待补充')}</small></span><span class="state-pill ${ok?'':'off'}">${ok?'采集正常':'连接失败'}</span><span><small class="monitor-time">检测时间：${escapeHtml(time)}</small><small class="monitor-detail ${ok?'':'error'}">${ok?`本次采集：${count} 条`:escapeHtml(`失败原因：${reason}`)}</small></span><span>${ok?'已同步':'待排查'}</span></div>`}).join('');
+    const p=payload.pipeline||{},stages=Array.isArray(p.sourceBreakdown)?p.sourceBreakdown:[];
+    const stats=`快照 ${p.raw??'—'} 条 · 130字不足淘汰 ${p.rejectedShort??'—'} 条 · 短讯候选 ${p.shortCandidates||0} / 模型准入 ${p.shortAdmitted||0} · 相关资讯 ${p.collected??'—'} 条 · 合并后 ${p.clustered??'—'} 个事件 · 展示 ${payload.items?.length||0} 条（国内 ${p.domesticDisplayed||0} / 国外 ${p.internationalDisplayed||0} / 未明确地区 ${(payload.items?.length||0)-(p.domesticDisplayed||0)-(p.internationalDisplayed||0)}）`;
+    let coverage=document.getElementById('hotspotCoverageStats');if(!coverage){coverage=document.createElement('p');coverage.id='hotspotCoverageStats';coverage.style.cssText='font-size:12px;color:#60758b;margin-top:8px';document.getElementById('lastRefresh')?.parentElement?.append(coverage)}coverage.textContent=stats;
+    const warning=p.coverageWarning==='NO_QUALIFIED_DOMESTIC_REPORTS'?'本轮没有通过130字及相关性标准的国内报道；请查看各信源淘汰数量。':p.coverageWarning==='NO_QUALIFIED_INTERNATIONAL_REPORTS'?'本轮没有通过标准的国外报道；不以虚构内容补位。':'';
+    const summary=`<div class="monitor-summary"><span class="state-pill">已检测 ${rows.length} 个信源</span><small>正常 ${rows.filter(x=>x.ok).length} 个 · 异常 ${rows.filter(x=>!x.ok).length} 个</small></div><p>${escapeHtml(stats)}</p>${warning?`<p class="monitor-alert">${escapeHtml(warning)}</p>`:''}`;
+    list.innerHTML=summary+rows.map(source=>{
+      const stage=stages.find(row=>row.source===source.spider),ok=Boolean(source.ok),date=new Date(source.checkedAt||payload.refreshedAt);
+      const time=Number.isNaN(date.getTime())?'未知':date.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
+      const detail=stage?`快照${stage.raw}条 → 字数不足${stage.rejectedShort}条 / 相关性或行情淘汰${stage.rejectedRelevanceOrTape}条 → 合格${stage.accepted}条（国内${stage.domestic} / 国外${stage.international} / 未明确${stage.other}）`:'等待筛选统计';
+      return `<div class="admin-row api-row"><span><b>${escapeHtml(source.label||source.spider||'未命名信源')}</b><small>${escapeHtml(source.spider||'')}</small></span><span class="state-pill ${ok?'':'off'}">${ok?'采集正常':'采集失败'}</span><span><small>检测时间：${escapeHtml(time)}</small><small>${ok?`本次采集：${Number(source.count)||0}条`:escapeHtml(source.reason||'采集失败')}</small><small>${escapeHtml(detail)}</small></span><span>${ok?'已同步':'待排查'}</span></div>`;
+    }).join('');
   }
   document.getElementById('refreshApi').onclick=async function(){
     const token=localStorage.getItem('futures-content-engine:access-token');
