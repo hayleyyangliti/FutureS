@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, sameEvidence, clusterItems } = require('../api/market-hotspots')._test;
+const { normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, sameEvidence, clusterItems, selectCoverage } = require('../api/market-hotspots')._test;
 const handler = require('../api/market-hotspots');
 
 const media = { spider: 'yicai_quick_news', label: '第一财经', grade: 'B类·已核验' };
@@ -30,6 +30,36 @@ test('admission rejects unrelated stock stories and generic headlines', () => {
   assert.equal(make('韩国检方要求尹锡悦涉无人机案二审维持30年刑期', 4), null);
 });
 
+test('coal border crossings and shipping disruptions qualify with commodity attribution', () => {
+  for (const title of ['甘其毛都口岸通关车辆恢复增长', '蒙煤通关量较前期增加']) {
+    const row = make(title, 100);
+    assert.ok(row);
+    assert.equal(row.category, '黑色');
+    assert.ok(row.contracts.includes('焦煤'));
+    assert.equal(row.scope, 'domestic');
+  }
+  const shipping = make('苏伊士运河航线受阻，船舶改道运输', 101);
+  assert.ok(shipping);
+  assert.equal(shipping.category, '能源化工');
+  assert.ok(shipping.contracts.includes('原油'));
+  assert.ok(make('伊朗宣布调整石油出口安排', 103).contracts.includes('原油'));
+  assert.equal(make('伊朗文化节公布活动安排', 104), null);
+  const body = make('跨境运输最新进展公布', 102, { content: longArticle('甘其毛都口岸通关车辆变化关系到蒙煤供应。') });
+  assert.ok(body);
+  assert.equal(body.category, '黑色');
+});
+
+test('domestic and overseas candidates both receive slots without inventing missing coverage', () => {
+  const overseas = Array.from({ length: 24 }, (_, i) => ({ id: `foreign-${i}`, scope: 'international', score: 100 - i }));
+  const domestic = Array.from({ length: 7 }, (_, i) => ({ id: `china-${i}`, scope: 'domestic', score: 60 - i }));
+  const result = selectCoverage([...overseas, ...domestic]);
+  assert.equal(result.length, 20);
+  assert.equal(result.filter((item) => item.scope === 'domestic').length, 5);
+  assert.deepEqual(result.map((item) => item.score), [...result.map((item) => item.score)].sort((a, b) => b - a));
+  assert.equal(selectCoverage(overseas).length, 20);
+  assert.ok(selectCoverage(overseas).every((item) => item.scope === 'international'));
+});
+
 test('long spider titles become core headlines while the complete source text stays below', () => {
   const full = '【德国央行：德国仍将是欧洲的稳定支柱】德国央行行长约阿希姆·纳格尔周五在曼谷表示，在债券市场动荡背景下，德国仍会是欧洲的稳定支柱。历经多年经济停滞，德国正恢复元气。';
   const row = make(full, 4, { content: '' });
@@ -54,6 +84,9 @@ test('market price moves and opening-session headlines are not admitted as news'
   assert.equal(isMarketTape('燃油涨超5%'), true);
   assert.equal(make('燃油涨超5%', 7), null);
   assert.equal(make('油价涨5.2%', 12), null);
+  assert.equal(make('芝加哥玉米期货跌约1.6%', 16), null);
+  assert.equal(make('LME金属期货多数收涨', 17), null);
+  assert.equal(make('10年期美债收益率涨超7个基点', 18), null);
   assert.equal(make('国债期货开盘', 13), null);
   assert.equal(make('国债期货开盘多数上涨', 8), null);
   assert.equal(make('沪铜主力合约盘中拉升', 9), null);

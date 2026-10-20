@@ -13,14 +13,14 @@ const DEFAULT_SOURCES = [{
   grade: 'B类·已核验',
   label: '东方财富期货快讯',
 }];
-const MAX_SOURCES = 8;
+const MAX_SOURCES = 19;
 const MAX_ITEMS_PER_SOURCE = 30;
 const MIN_ARTICLE_CHARS = 130;
 const CATEGORY_RULES = [
   ['农产品', /豆[粕油]|玉米|小麦|棉花|白糖|生猪|鸡蛋|苹果|红枣|油脂|粮食|农产/],
   ['有色及贵金属', /黄金|白银|有色金属|贵金属|沪[铜铝锌镍锡铅]|[铜铝锌镍锡铅](?:价|矿|锭|库存|现货|冶炼|期货|供应|供给|需求|产量)/],
-  ['黑色', /螺纹|热卷|铁矿|焦煤|焦炭|钢材|钢铁|煤炭/],
-  ['能源化工', /原油|油价|燃料油|沥青|天然气|化工|甲醇|PTA|乙二醇|塑料|橡胶|尿素/],
+  ['黑色', /螺纹|热卷|铁矿|焦煤|焦炭|钢材|钢铁|煤炭|蒙煤|甘其毛都|策克口岸|满都拉口岸/],
+  ['能源化工', /原油|油价|燃料油|沥青|天然气|化工|甲醇|PTA|乙二醇|塑料|橡胶|尿素|伊朗.{0,18}(?:制裁|能源|冲突|袭击)|苏伊士运河|霍尔木兹|红海航运/],
   ['绿色金融及新能源', /新能源|光伏|锂|碳交易|碳排放|风电|储能/],
   ['金融工程', /期权|波动率|量化|指数|套利/],
   ['资产配置', /国债|股债|资产配置|风险偏好|美元|汇率/],
@@ -28,18 +28,23 @@ const CATEGORY_RULES = [
 ];
 // Single metal characters match people's names (e.g. 尹锡悦), so require market context.
 const FUTURES_TERMS = /期货|期权|大宗商品|商品(?:价格|期货|市场)|原油|油价|石油|天然气|黄金|白银|有色金属|贵金属|沪[铜铝锌镍锡铅]|[铜铝锌镍锡铅](?:价|矿|锭|库存|现货|冶炼|期货|供应|供给|需求|产量)|铁矿|螺纹|钢材|焦煤|焦炭|豆[粕油]|玉米|小麦|棉花|白糖|生猪|鸡蛋|甲醇|PTA|橡胶|国债|股指|油脂|碳酸锂|碳交易|碳排放/;
+const SUPPLY_CHAIN_TERMS = /甘其毛都|策克口岸|满都拉口岸|蒙煤|蒙古煤|蒙古(?:国)?煤炭|煤炭通关|口岸通关|伊朗.{0,18}(?:原油|石油|制裁|能源|冲突|袭击)|(?:制裁|袭击|封锁).{0,12}伊朗|苏伊士(?:运河)?|霍尔木兹(?:海峡)?|红海航运|海运(?:费|运力|航线)|油轮(?:运输|运费)|航道(?:中断|受阻|恢复)|港口(?:库存|通关|装运)|铁路(?:运量|运输煤炭)|大宗商品供应链/;
 const IMPORTANT_TERMS = /央行|美联储|监管|货币政策|财政政策|利率|通胀|CPI|PPI|GDP|非农|关税|减产|增产|库存|交易所|数据公布/;
 const MACRO_HEADLINE_TERMS = /央行|美联储|利率|通胀|CPI|PPI|GDP|非农|美元|汇率|关税|欧佩克|OPEC|经济数据|财政政策|债券市场|收益率/;
 const GENERIC_HEADLINE = /^(期货|商品|市场|财经)(热点|快讯|资讯|新闻)(追踪|汇总|速览)?$/;
-const MARKET_TAPE_CONTEXT = /期货|期权|期市|合约|主力|燃油|燃料油|油价|原油|布油|美油|黄金|白银|贵金属|有色金属|黑色系|农产品板块|能源化工板块|沪[铜铝锌镍锡铅]|铁矿|螺纹|焦煤|焦炭|豆粕|豆油|玉米|生猪|国债|股指|期指|商品指数/;
-const MARKET_TAPE_ACTION = /开盘|收盘|高开|低开|平开|盘中|早盘|午盘|夜盘|尾盘|涨超|跌超|涨逾|跌逾|涨幅|跌幅|涨停|跌停|上涨|下跌|拉升|跳水|走高|走低|升破|跌破|[涨跌]\s*\d|报(?:\d|[一二三四五六七八九十])/;
+const MARKET_TAPE_CONTEXT = /期货|期权|期市|合约|主力|燃油|燃料油|油价|原油|布油|美油|黄金|白银|贵金属|有色金属|黑色系|农产品板块|能源化工板块|沪[铜铝锌镍锡铅]|铁矿|螺纹|焦煤|焦炭|豆粕|豆油|玉米|生猪|国债|美债|股指|期指|商品指数/;
+const MARKET_TAPE_ACTION = /开盘|收盘|收涨|收跌|高开|低开|平开|盘中|早盘|午盘|夜盘|尾盘|涨超|跌超|涨约|跌约|涨逾|跌逾|涨幅|跌幅|涨停|跌停|上涨|下跌|拉升|跳水|走高|走低|升破|跌破|[涨跌]\s*\d|报(?:\d|[一二三四五六七八九十])/;
 const SOURCE_ORIGINS = {
   yicai_quick_news: 'https://www.yicai.com', sina_finance_news: 'https://finance.sina.com.cn',
   hexun_global_news: 'https://news.hexun.com', futunn_flash_news: 'https://news.futunn.com',
   wallstreetcn_global_news: 'https://wallstreetcn.com', jin10_flash_news: 'https://flash.jin10.com',
   fortune_flash_news: 'https://fortune.com', marketwatch_flash_news: 'https://www.marketwatch.com',
   '21jingji_quick_news': 'https://www.21jingji.com', ths_10jqka_global_news: 'https://news.10jqka.com.cn',
-  jrj_news_flash: 'https://24h.jrj.com.cn',
+  jrj_news_flash: 'https://24h.jrj.com.cn', eastmoney_fast_news: 'https://finance.eastmoney.com',
+  cls_global_news: 'https://www.cls.cn', xueqiu_flash_news: 'https://xueqiu.com',
+  xuangubao_flash_news: 'https://www.xuangubao.cn', jiemian_flash_news: 'https://www.jiemian.com',
+  gelonghui_flash_news: 'https://www.gelonghui.com', investing_news: 'https://cn.investing.com',
+  forbes_flash_news: 'https://www.forbes.com',
 };
 
 function parseSources() {
@@ -91,7 +96,10 @@ function normalizeDate(value) {
 function classify(value) { return (CATEGORY_RULES.find(([, rule]) => rule.test(value)) || ['宏观'])[0]; }
 function contractsFor(value) {
   const names = ['黄金', '白银', '沪铜', '沪铝', '原油', '燃料油', '沥青', '螺纹钢', '铁矿石', '焦煤', '焦炭', '豆粕', '豆油', '玉米', '棉花', '白糖', '生猪', '甲醇', 'PTA', '橡胶', '碳酸锂', '国债', '股指'];
-  return names.filter((name) => value.includes(name.replace(/^沪/, ''))).slice(0, 4);
+  const matched = names.filter((name) => value.includes(name.replace(/^沪/, '')));
+  if (/甘其毛都|策克口岸|满都拉口岸|蒙煤|蒙古煤|煤炭通关/.test(value) && !matched.includes('焦煤')) matched.push('焦煤');
+  if (/伊朗.{0,18}(?:原油|石油|制裁|能源|冲突|袭击)|(?:制裁|袭击|封锁).{0,12}伊朗|苏伊士(?:运河)?|霍尔木兹(?:海峡)?|红海航运|油轮运输/.test(value) && !matched.includes('原油')) matched.push('原油');
+  return matched.slice(0, 4);
 }
 function isMarketTape(title) {
   const lead = text(title).split(/[，,。；;]/, 1)[0];
@@ -136,14 +144,17 @@ function normalizeItem(item, source, index) {
   // Preserve the long original title as the expandable excerpt when it carries
   // more detail than the source's separate summary/content field.
   const summary = (originalTitle.length > 52 && originalTitle.length > sourceSummary.length ? originalTitle : sourceSummary || originalTitle).slice(0, 900);
-  if (!title || title.length < 6 || GENERIC_HEADLINE.test(title) || isMarketTape(title) || (!FUTURES_TERMS.test(title) && !MACRO_HEADLINE_TERMS.test(title))) return null;
-  const content = `${title} ${summary}`;
+  const supplyChain = SUPPLY_CHAIN_TERMS.test(`${title} ${summary}`);
+  // A passing commodity reference in the body must not admit unrelated stories.
+  if (!title || title.length < 6 || GENERIC_HEADLINE.test(title) || isMarketTape(title) || (!FUTURES_TERMS.test(title) && !MACRO_HEADLINE_TERMS.test(title) && !supplyChain)) return null;
+  const relevanceText = supplyChain ? `${title} ${summary}` : title;
   return {
     id: `${source.spider}:${item?.id || item?.code || index}`, title, originalTitle, summary,
     sourceUrl: articleUrl(item, source),
     source: text(item?.source || item?.media || item?.publisher || item?.platform || source.label || source.spider),
     publishedAt: normalizeDate(item?.pub_time || item?.publish_time || item?.publishTime || item?.published_at || item?.publishedAt || item?.time || item?.datetime || item?.date),
-    grade: source.grade, category: classify(title), contracts: contractsFor(title),
+    grade: source.grade, category: classify(relevanceText), contracts: contractsFor(relevanceText),
+    scope: newsScope(title) === 'other' ? newsScope(summary) : newsScope(title), supplyChain,
   };
 }
 // \W is ASCII-only in JavaScript and silently discards Chinese titles.
@@ -200,8 +211,10 @@ function sameEvidence(left, right) {
 }
 function score(primary, sources) {
   const count = new Set(sources.map((source) => source.name)).size, age = ageMinutes(primary.publishedAt);
-  const direct = FUTURES_TERMS.test(primary.title), macro = MACRO_HEADLINE_TERMS.test(primary.title);
-  const importance = Math.min(45, 14 + (IMPORTANT_TERMS.test(primary.title) ? 12 : 0) + (direct ? 8 : macro ? 4 : 0) + (primary.grade === 'A类信源' ? 6 : 0) + Math.min(5, Math.max(0, count - 1) * 3));
+  const relevanceText = `${primary.title} ${primary.summary || ''}`;
+  const direct = FUTURES_TERMS.test(primary.title) || SUPPLY_CHAIN_TERMS.test(relevanceText), macro = MACRO_HEADLINE_TERMS.test(primary.title);
+  const supplyEvent = SUPPLY_CHAIN_TERMS.test(relevanceText) && /通关|进口|出口|运输|停产|复产|封锁|制裁|冲突|袭击|中断|受阻|恢复|运量|库存/.test(relevanceText);
+  const importance = Math.min(45, 14 + (IMPORTANT_TERMS.test(primary.title) || supplyEvent ? 12 : 0) + (direct ? 8 : macro ? 4 : 0) + (primary.grade === 'A类信源' ? 6 : 0) + Math.min(5, Math.max(0, count - 1) * 3));
   const timeliness = age == null ? 10 : age <= 15 ? 25 : age <= 60 ? 22 : age <= 240 ? 18 : age <= 720 ? 13 : age <= 1440 ? 9 : 5;
   // Only distinct content from a different publisher contributes corroboration;
   // long text and syndicated copies do not create information gain by themselves.
@@ -219,7 +232,7 @@ function clusterItems(items) {
     if (!cluster) { cluster = { items: [] }; clusters.push(cluster); }
     cluster.items.push(item);
   }
-  return clusters.map((cluster, index) => {
+  const ranked = clusters.map((cluster, index) => {
     const distinct = [];
     for (const item of [...cluster.items].sort((a, b) => Date.parse(a.publishedAt || 0) - Date.parse(b.publishedAt || 0))) {
       const duplicateIndex = distinct.findIndex((entry) =>
@@ -234,8 +247,26 @@ function clusterItems(items) {
     const firstPublishedAt = cluster.items.map((item) => item.publishedAt).filter((value) => Number.isFinite(Date.parse(value))).sort()[0] || primary.publishedAt;
     const grade = sources.some((source) => source.grade === 'A类信源') ? 'A类信源' : 'B类·已核验';
     const scoring = score({ ...primary, publishedAt: firstPublishedAt, grade }, sources);
-    return { id: `hotspot-${index + 1}`, title: primary.title, summary: primary.summary, summaryType: primary.summary === primary.title ? 'TITLE_ONLY' : 'SOURCE_EXCERPT', source: primary.source, sourceUrl: primary.sourceUrl, publishedAt: firstPublishedAt, grade, category: primary.category, contracts: primary.contracts, sources, duplicateCount: cluster.items.length - distinct.length, scoring, score: scoring.total };
-  }).filter(Boolean).sort((a, b) => b.score - a.score || Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0)).slice(0, 20);
+    return { id: `hotspot-${index + 1}`, title: primary.title, summary: primary.summary, summaryType: primary.summary === primary.title ? 'TITLE_ONLY' : 'SOURCE_EXCERPT', source: primary.source, sourceUrl: primary.sourceUrl, publishedAt: firstPublishedAt, grade, category: primary.category, contracts: primary.contracts, scope: primary.scope || 'other', sources, duplicateCount: cluster.items.length - distinct.length, scoring, score: scoring.total };
+  }).filter(Boolean).sort((a, b) => b.score - a.score || Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0));
+  return selectCoverage(ranked);
+}
+function newsScope(value) {
+  if (/国内|我国|中国|人民币|国务院|发改委|海关总署|商务部|国家能源局|中国人民银行|央行逆回购|上期所|大商所|郑商所|中金所|甘其毛都|策克口岸|满都拉口岸|蒙煤|内蒙古|山西|山东|唐山|河北|青岛港|日照港/.test(value)) return 'domestic';
+  if (/美国|美联储|美债|欧洲|欧盟|英国|日本|韩国|加拿大|澳大利亚|新西兰|巴西|阿根廷|俄罗斯|乌克兰|伊朗|中东|沙特|苏伊士|霍尔木兹|红海|OPEC|欧佩克|LME|芝加哥/.test(value)) return 'international';
+  return 'other';
+}
+function selectCoverage(ranked, limit = 20) {
+  // Reserve up to a quarter of the available slots for each scope. Fill only
+  // from admitted reports, then keep the resulting list in score order.
+  const size = Math.min(limit, ranked.length), quota = Math.max(1, Math.floor(size / 4));
+  const reserved = new Set(['domestic', 'international'].flatMap((scope) =>
+    ranked.filter((item) => item.scope === scope).slice(0, quota)));
+  for (const item of ranked) {
+    if (reserved.size >= size) break;
+    reserved.add(item);
+  }
+  return ranked.filter((item) => reserved.has(item)).slice(0, size);
 }
 function cleanAiText(value, maxLength) { return text(value).replace(/^@/g, '').slice(0, maxLength); }
 function parseAiJson(value) {
@@ -316,7 +347,11 @@ const VERIFIED_LABELS = {
   wallstreetcn_global_news: '华尔街见闻', jin10_flash_news: '金十数据',
   fortune_flash_news: 'Fortune', marketwatch_flash_news: 'MarketWatch',
   '21jingji_quick_news': '21 财经', ths_10jqka_global_news: '同花顺',
-  jrj_news_flash: '金融界',
+  jrj_news_flash: '金融界', eastmoney_fast_news: '东方财富',
+  cls_global_news: '财联社', xueqiu_flash_news: '雪球',
+  xuangubao_flash_news: '选股宝', jiemian_flash_news: '界面新闻',
+  gelonghui_flash_news: '格隆汇', investing_news: 'Investing.com',
+  forbes_flash_news: '福布斯',
 };
 
 module.exports = async (req, res) => {
@@ -361,10 +396,15 @@ module.exports = async (req, res) => {
     return send(res, 200, {
       items: analysis.items, refreshedAt: feed.refreshedAt,
       stale, tradingDate: Boolean(feed.tradingDate && sameShanghaiDate),
-      source: `服务器缓存：${Object.keys(VERIFIED_LABELS).length} 个已验证信源`,
+      source: `服务器缓存：${Object.keys(VERIFIED_LABELS).length} 个准入信源，${statuses.filter((status) => status.ok).length} 个采集正常`,
       pipeline: {
         collected: collected.length, rejected: feed.items.length - collected.length, rejectedShort: admitted.length - longEnough.length,
         minArticleChars: MIN_ARTICLE_CHARS, clustered: clustered.length,
+        domesticCandidates: collected.filter((item) => item.scope === 'domestic').length,
+        internationalCandidates: collected.filter((item) => item.scope === 'international').length,
+        supplyChainCandidates: collected.filter((item) => item.supplyChain).length,
+        domesticDisplayed: analysis.items.filter((item) => item.scope === 'domestic').length,
+        internationalDisplayed: analysis.items.filter((item) => item.scope === 'international').length,
         minSources: 1, maxSources: 3,
         sourcesRequested: Object.keys(VERIFIED_LABELS).length,
         sourcesSucceeded: statuses.filter((status) => status.ok).length,
@@ -384,4 +424,4 @@ module.exports = async (req, res) => {
 };
 
 // Pure helpers are exposed for regression tests; this does not create an API route.
-module.exports._test = { normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, sameEvidence, clusterItems, score };
+module.exports._test = { normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, sameEvidence, clusterItems, score, newsScope, selectCoverage };
