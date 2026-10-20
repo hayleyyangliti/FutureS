@@ -1,7 +1,8 @@
 {
   "version": 2,
   "functions": {
-    "api/market-hotspots.js": { "maxDuration": 240 }
+    "api/market-hotspots.js": { "maxDuration": 240 },
+    "api/internal/hotspot-refresh.js": { "maxDuration": 300 }
   },
   "headers": [
     {
