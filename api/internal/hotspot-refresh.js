@@ -23,7 +23,7 @@ module.exports=async(req,res)=>{
     const rows=await supabase('/rest/v1/omnidata_news_snapshots?id=eq.current&select=payload,updated_at&limit=1');
     const feed=rows?.[0]?.payload?.data,version=feed?.refreshedAt||rows?.[0]?.updated_at;
     if(!Array.isArray(feed?.items)||!Number.isFinite(Date.parse(version)))return send(res,503,{error:'RAW_SNAPSHOT_MISSING'});
-    key='model-v3-'+crypto.createHash('sha256').update(version).digest('hex');token=crypto.randomUUID();
+    key='model-v4-'+crypto.createHash('sha256').update(version).digest('hex');token=crypto.randomUUID();
     if(!await claimJob(key,token))return send(res,202,{status:'ALREADY_RUNNING_OR_COMPLETED'});
     const previous=await readRanking(),items=feed.items.filter(entry=>entry&&Object.hasOwn(VERIFIED_LABELS,entry.source)).map(prepareModelItem).filter(Boolean);
     const {analysis,records}=await evaluateResumable(items,await readCheckpoints(),{budgetMs:150000});
