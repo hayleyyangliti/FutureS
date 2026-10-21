@@ -5,15 +5,16 @@ const job=require('../api/internal/hotspot-refresh');
 const handler=require('../api/market-hotspots');
 const item=(id,source='财联社')=>({id,title:'央行宣布降准',summary:'央行公布政策事实与实施日期',source,publishedAt:new Date().toISOString(),sources:[{name:source,url:'https://example.com/article/'+id}],scoring:{importance:35,timeliness:25,informationGain:10,futuresRelevance:9},score:79,scope:'domestic'});
 test('public ranking excludes private pool and model explanations',()=>{
- const result=rankingResponse({payload:{_pool:[{secret:'internal'}],items:[{...item('a'),scoringReasons:{importance:'private'},scoringEvidence:'private'}]},source_refreshed_at:new Date().toISOString()});
+ const result=rankingResponse({payload:{_pool:[{secret:'internal'}],items:[{...item('a'),summaryEvidence:['internal'],summaryInputKey:'internal',scoringReasons:{importance:'private'},scoringEvidence:'private'}]},source_refreshed_at:new Date().toISOString()});
  assert.equal(result._pool,undefined);assert.equal(result.items[0].scoringReasons,undefined);assert.equal(result.items[0].scoringEvidence,undefined);assert.equal(result.pipeline.mode,'BACKGROUND_RANKING');
+ assert.equal(result.items[0].summaryEvidence,undefined);assert.equal(result.items[0].summaryInputKey,undefined);
 });
 test('cross-source grouping preserves every event once and caps sources at three',()=>{
  const events=[item('a'),item('b','新浪财经'),item('c','金十数据'),item('d','同花顺')];
  assert.throws(()=>validateGroups(events,{groups:[{ids:['a','b']}]}));
  assert.throws(()=>validateGroups(events,{groups:[{ids:['a','a','b','c','d']}]}));
  const groups=validateGroups(events,{groups:[{ids:['a','b','c','d']}]});const result=mergeGroups(events,groups);
- assert.equal(result.length,1);assert.equal(result[0].sources.length,3);assert.equal(result[0].summaryType,'SOURCE_SYNTHESIS');
+ assert.equal(result.length,1);assert.equal(result[0].sources.length,3);assert.equal(result[0].reports.length,1);assert.ok(!result[0].summary.includes('主要事实（'));
  assert.equal(result[0].scoring.informationGain,10);
 });
 test('recent model-approved pool retains older events but expires after 24 hours',()=>{
