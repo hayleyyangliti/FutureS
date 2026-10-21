@@ -13,11 +13,11 @@ function mergeGroups(events,groups){
     const sources=[...new Map(members.flatMap(item=>item.sources||[]).map(source=>[source.name,source])).values()].slice(0,3);
     const summaries=[];
     for(const member of members.flatMap(item=>item.reports||[item])){const value=member.summary?.trim();if(value&&!summaries.some(row=>row.value===value)){summaries.push({source:member.source,value});}}
-    const summary=summaries.slice(0,3).map((row,index)=>`${index?'补充报道':'主要事实'}（${row.source}）：${row.value.slice(0,index?350:650)}`).join('\n\n');
     const publishedAt=members.map(item=>item.publishedAt).filter(value=>Number.isFinite(Date.parse(value))).sort()[0]||primary.publishedAt;
     const scoring={...primary.scoring,timeliness:timeScore(publishedAt)};scoring.total=scoring.importance+scoring.timeliness+scoring.informationGain+scoring.futuresRelevance;
-    const combined=members.length>1||summaries.length>1;
-    return {...primary,summary:combined?summary:primary.summary,summaryType:combined?'SOURCE_SYNTHESIS':primary.summaryType,sources,publishedAt,scoring,score:scoring.total,
+    // Grouping keeps raw evidence for the separate model summarizer. Do not
+    // concatenate excerpts and present that concatenation as a synthesis.
+    return {...primary,summary:primary.summary,summaryType:primary.summaryType,reports:summaries.map(row=>({source:row.source,summary:row.value})),sources,publishedAt,scoring,score:scoring.total,
       mergedReports:members.reduce((sum,item)=>sum+(item.mergedReports||1),0),duplicateCount:0,shortNotice:members.every(item=>item.shortNotice)};
   }).sort((a,b)=>b.score-a.score||Date.parse(b.publishedAt||0)-Date.parse(a.publishedAt||0));
 }

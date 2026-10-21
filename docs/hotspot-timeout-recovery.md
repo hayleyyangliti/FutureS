@@ -5,7 +5,8 @@ timed out, and two DeepSeek responses failed count validation. The previous
 20-record/18-second calls discarded entire batches on one invalid row.
 
 The worker now uses five records per call, up to three concurrent batches,
-60 seconds per provider, and a 190-second overall scoring deadline. MiniMax
+60 seconds per provider, and a bounded overall scoring deadline (now 150 seconds
+in the background worker to reserve time for event summaries). MiniMax
 remains primary; DeepSeek handles only missing/invalid rows with thinking
 explicitly disabled. Validated rows are retained without relaxing scores,
 admission, evidence, duplicate-ID or contract checks.
@@ -29,8 +30,9 @@ where jobname = 'futures-hotspot-background';
 ```
 
 The existing six-minute lease prevents concurrent same-snapshot work. The
-190-second scoring limit reserves time for the existing 70-second maximum
-consolidation attempts and persistence within the 300-second function limit.
+150-second scoring limit reserves time for the existing 70-second maximum
+consolidation attempts, 45-second summary phase and persistence within the
+300-second function limit.
 Completed snapshots cause an inexpensive no-op on subsequent cron runs.
 Partial jobs retain their checkpoints and remain resumable. A consolidation
 failure leaves the previous published ranking readable and retains decisions.
