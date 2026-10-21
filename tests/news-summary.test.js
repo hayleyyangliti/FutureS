@@ -11,6 +11,11 @@ test('model summaries require real quotes and reject copied text, templates and 
  assert.equal(validateSummaries(inputs,{items:[{...valid,evidence:[{reportId:'r0',quote:'不存在的事实'}]}]}).size,0);
  assert.equal(validateSummaries(inputs,{items:[valid,valid]}).size,0);
 });
+test('200 character limit is enforced in validation, including punctuation',()=>{
+ const inputs=[evidenceInput(item('a'))],valid=row(inputs[0]);
+ assert.equal(validateSummaries(inputs,{items:[{...valid,summary:'概括'.repeat(100)}]}).size,1);
+ assert.equal(validateSummaries(inputs,{items:[{...valid,summary:'概括'.repeat(100)+'。'}]}).size,0);
+});
 test('grouping keeps evidence from every member instead of publisher-by-publisher concatenation',()=>{
  const a=item('a'),b={...item('b'),source:'第一财经',reports:[{source:'第一财经',summary:'主管部门补充，通关优化将于11月实施。'}]};
  const merged=mergeGroups([a,b],[{ids:['a','b']}])[0];assert.equal(merged.reports.length,2);assert.ok(!merged.summary.includes('补充报道（'));
