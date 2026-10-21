@@ -31,7 +31,7 @@ async function consolidateEvents(events){
       const response=await fetch(deep?'https://api.deepseek.com/chat/completions':'https://api.minimaxi.com/v1/text/chatcompletion_v2',{
         method:'POST',signal:controller.signal,headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},
         body:JSON.stringify({model:deep?(process.env.DEEPSEEK_MODEL||'deepseek-flash'):(process.env.MINIMAX_MODEL||'MiniMax-M2.7'),stream:false,temperature:0.1,
-          ...(deep?{max_tokens:6000,response_format:{type:'json_object'}}:{max_completion_tokens:6000}),messages:[{role:'system',content:prompt},{role:'user',content:JSON.stringify(events.map(item=>({id:item.id,title:item.title,summary:item.summary.slice(0,240),publishedAt:item.publishedAt,source:item.source})))}]}),
+          ...(deep?{max_tokens:6000,thinking:{type:'disabled'},response_format:{type:'json_object'}}:{max_completion_tokens:6000}),messages:[{role:'system',content:prompt},{role:'user',content:JSON.stringify(events.map(item=>({id:item.id,title:item.title,summary:item.summary.slice(0,240),publishedAt:item.publishedAt,source:item.source})))}]}),
       });if(!response.ok)throw Error('MERGE_REQUEST_FAILED');
       const body=await response.json(),raw=body?.choices?.[0]?.message?.content;if(typeof raw!=='string')throw Error('MERGE_FORMAT');
       const groups=validateGroups(events,JSON.parse(raw.replace(/<think>[\s\S]*?<\/think>/g,'').replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'').trim()));
