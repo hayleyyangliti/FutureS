@@ -6,12 +6,11 @@ const { readRanking, rankingResponse } = require('./_rank-store');
 // Reuse existing server-only model credentials. Scoring never changes source facts.
 
 // Explicitly configured sources are preferred. The fallback keeps existing deployments working.
-const DEFAULT_SOURCES = [{
-  spider: 'eastmoney_fast_news',
-  params: { page_size: 20, fast_column: '113' },
-  grade: 'B类·已核验',
-  label: '东方财富期货快讯',
-}];
+const DEFAULT_SOURCES = [
+  { spider: 'yicai_quick_news', params: { page_size: 20 }, grade: 'B类·已核验', label: '第一财经' },
+  { spider: 'sina_finance_news', params: { page_size: 20 }, grade: 'B类·已核验', label: '新浪财经' },
+  { spider: 'jin10_flash_news', params: { num: 20 }, grade: 'B类·已核验', label: '金十数据' },
+];
 const MAX_SOURCES = 19;
 const MAX_ITEMS_PER_SOURCE = 30;
 const MIN_ARTICLE_CHARS = 130;
@@ -145,6 +144,10 @@ function articleUrl(item, source) {
       const url = new URL(absolute, origin);
       if (/^https?:$/.test(url.protocol) && url.hostname.includes('.') && isArticleIdentity(url.href)) return url.href;
     } catch (_) { /* Try the next URL field. */ }
+  }
+  if (source?.spider === 'jin10_flash_news') {
+    const id = text(item?.id || item?.flash_id || item?.flashId || item?.news_id || item?.newsId);
+    if (/^\\d{10,30}$/.test(id)) return `https://flash.jin10.com/detail/${id}`;
   }
   return '';
 }
