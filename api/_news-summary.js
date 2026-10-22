@@ -56,7 +56,7 @@ async function requestSummaries(inputs,provider,deadline){
 async function summarizeEvents(items,previous=[],options={}){
   const deadline=Date.now()+(options.budgetMs??45000),cached=new Map(previous.filter(x=>x.summaryMethod==='MODEL_SUMMARY'&&x.summaryInputKey&&typeof x.summary==='string'&&Array.from(x.summary).length<=200&&typeof x.title==='string'&&Array.from(x.title).length<=20).map(x=>[x.summaryInputKey,x]));
   const results=new Map(),pending=[];
-  for(const item of items){const key=summaryKey(item),old=cached.get(key);if(old)results.set(item.id,{summary:old.summary,summaryEvidence:old.summaryEvidence,summaryMethod:'MODEL_SUMMARY',summaryInputKey:key});else pending.push(item);}
+  for(const item of items){const key=summaryKey(item),old=cached.get(key);if(old)results.set(item.id,{title:old.title,summary:old.summary,summaryEvidence:old.summaryEvidence,summaryMethod:'MODEL_SUMMARY',summaryInputKey:key});else pending.push(item);}
   const batches=[];for(let i=0;i<pending.length;i+=5)batches.push(pending.slice(i,i+5));
   let cursor=0;
   await Promise.all(Array.from({length:Math.min(4,batches.length)},async()=>{while(cursor<batches.length){
@@ -64,7 +64,7 @@ async function summarizeEvents(items,previous=[],options={}){
     for(const provider of ['MiniMax','DeepSeek']){
       if(!remaining.length||Date.now()>=deadline-1000)break;
       try{const rows=await requestSummaries(remaining.map(evidenceInput),provider,deadline);
-        for(const item of remaining){const row=rows.get(item.id);if(row)results.set(item.id,{summary:row.summary,summaryEvidence:row.evidence,summaryMethod:'MODEL_SUMMARY',summaryInputKey:summaryKey(item)});}
+        for(const item of remaining){const row=rows.get(item.id);if(row)results.set(item.id,{title:row.title,summary:row.summary,summaryEvidence:row.evidence,summaryMethod:'MODEL_SUMMARY',summaryInputKey:summaryKey(item)});}
         remaining=remaining.filter(item=>!results.has(item.id));
       }catch(error){console.warn('Event summary failed',{provider,type:error.name});}
     }
