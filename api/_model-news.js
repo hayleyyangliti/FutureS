@@ -89,7 +89,7 @@ function timeScore(value) {
 }
 function selectEvents(events) {
   events.sort((a,b)=>b.score-a.score||Date.parse(b.publishedAt||0)-Date.parse(a.publishedAt||0));
-  const size=Math.min(20,events.length),quota=Math.floor(size/4),selected=new Set(['domestic','international'].flatMap(scope=>events.filter(item=>item.scope===scope).slice(0,quota)));
+  const size=Math.min(100,events.length),quota=Math.floor(size/4),selected=new Set(['domestic','international'].flatMap(scope=>events.filter(item=>item.scope===scope).slice(0,quota)));
   for(const item of events){if(selected.size>=size)break;selected.add(item);}
   return events.filter(item=>selected.has(item));
 }
