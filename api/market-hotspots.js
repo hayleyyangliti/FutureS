@@ -275,7 +275,7 @@ function score(primary, sources) {
   const futuresRelevance = direct ? 10 : macro ? 6 : 0;
   return { importance, timeliness, informationGain, futuresRelevance, total: importance + timeliness + informationGain + futuresRelevance };
 }
-function clusterItems(items, limit = 20) {
+function clusterItems(items, limit = 100) {
   const clusters = [];
   for (const item of items) {
     let cluster = clusters.find((candidate) => candidate.items.slice(0, 1).some((entry) =>
@@ -310,7 +310,7 @@ function newsScope(value) {
   if (/美国|美联储|美债|欧洲|欧盟|英国|日本|韩国|加拿大|澳大利亚|新西兰|巴西|阿根廷|俄罗斯|乌克兰|伊朗|中东|沙特|苏伊士|霍尔木兹|红海|OPEC|欧佩克|LME|芝加哥/.test(value)) return 'international';
   return 'other';
 }
-function selectCoverage(ranked, limit = 20) {
+function selectCoverage(ranked, limit = 100) {
   // Reserve up to a quarter of the available slots for each scope. Fill only
   // from admitted reports, then keep the resulting list in score order.
   const size = Math.min(limit, ranked.length), quota = Math.max(1, Math.floor(size / 4));
