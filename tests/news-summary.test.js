@@ -47,7 +47,8 @@ test('background worker saves model summaries without changing ranking scores or
   const path=String(url);
   if(path.includes('/omnidata_news_snapshots?'))return db([{payload:{data:{refreshedAt:version,items:[{source:'cls_global_news',item:{title:'煤炭进口通关安排优化',content:original,pub_time:version,url:'https://www.cls.cn/detail/123456'}}]}}}]);
   if(path.includes('/rpc/claim_omnidata_hotspot_job'))return db(true);
-  if(path.includes('/omnidata_hotspot_rankings?')||path.includes('/omnidata_hotspot_jobs?')&&options.method!=='PATCH')return db([]);
+  if(path.includes('/omnidata_hotspot_rankings?'))return db([{source_refreshed_at:version,payload:{policyVersion:require('../api/_news-policy').POLICY,items:[],_pool:[],collectionWindow:{version:2,tradingDate:new Date(Date.now()+8*3600000).toISOString().slice(0,10),firstOfDay:false}}}]);
+  if(path.includes('/omnidata_hotspot_jobs?')&&options.method!=='PATCH')return db([]);
   if(path.includes('/omnidata_hotspot_jobs?')){finished=JSON.parse(options.body);return db(null);}
   if(path.includes('/rpc/publish_omnidata_hotspot_ranking')){published=JSON.parse(options.body).p_payload;return db(true);}
   const body=JSON.parse(options.body),inputs=JSON.parse(body.messages[1].content).items;

@@ -30,6 +30,7 @@ test('media digests are excluded without excluding individual official announcem
 test('only first daily collection includes overnight reports, respecting close boundary and weekends',()=>{
  const first=P.collectionWindow(new Date(at).toISOString(),null,at);
  assert.equal(first.start,'2026-10-22T07:00:00.000Z');
+ const delayedFirst=P.collectionWindow('2026-10-23T09:30:00+08:00',null,at+1800000);assert.equal(P.inWindow('2026-10-23T09:15:00+08:00',delayedFirst),false);
  assert.equal(P.inWindow('2026-10-22T16:00:00+08:00',first),true);assert.equal(P.inWindow('2026-10-22T14:59:00+08:00',first),false);
  const later=P.collectionWindow('2026-10-23T09:30:00+08:00',{collectionWindow:first},at+1800000);
  assert.equal(later.firstOfDay,false);assert.equal(P.inWindow('2026-10-22T23:59:00+08:00',later),false);

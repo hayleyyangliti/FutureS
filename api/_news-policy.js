@@ -24,8 +24,10 @@ function collectionWindow(version,previous=null,now=Date.now()){
   const previousDate=old?.tradingDate||(Number.isFinite(Date.parse(previous?.source_refreshed_at))?chinaDate(Date.parse(previous.source_refreshed_at)):null);
   const first=previousDate!==date;
   const close=/^\d{2}:\d{2}$/.test(process.env.HOTSPOT_MARKET_CLOSE||'')?process.env.HOTSPOT_MARKET_CLOSE:'15:00';
+  const open=/^\d{2}:\d{2}$/.test(process.env.HOTSPOT_MARKET_OPEN||'')?process.env.HOTSPOT_MARKET_OPEN:'09:00';
   const start=first?Date.parse(chinaDate(priorTradingDay(at))+'T'+close+':00+08:00'):dayStart(at);
-  return {version:2,tradingDate:date,firstOfDay:first,start:new Date(start).toISOString(),end:new Date(at).toISOString(),allowOvernightUntil:first?new Date(now+35*60000).toISOString():null};
+  const end=first?Math.min(at,Date.parse(date+'T'+open+':00+08:00')):at;
+  return {version:2,tradingDate:date,firstOfDay:first,start:new Date(start).toISOString(),end:new Date(end).toISOString(),allowOvernightUntil:first?new Date(now+35*60000).toISOString():null};
 }
 function displayWindow(window,now=Date.now()){
   const overnight=window?.version===2&&window.firstOfDay&&window.tradingDate===chinaDate(now)&&Date.parse(window.allowOvernightUntil)>now;
