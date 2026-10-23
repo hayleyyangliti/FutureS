@@ -72,5 +72,6 @@ test('reader cache refresh is allowed only for obsolete or incomplete rankings',
  let policy=P.POLICY;
  global.fetch=async(url)=>{const s=String(url);if(s.endsWith('/rpc/current_profile'))return {ok:true,json:async()=>[{auth_user_id:'viewer',email_prefix:'futures',role:'user'}]};if(s.includes('/omnidata_hotspot_rankings?'))return {ok:true,text:async()=>JSON.stringify([{payload:{policyVersion:policy,pipeline:{modelStats:{pending:0,summaryPending:0}}}}])};if(s.includes('/omnidata_news_snapshots?'))return {ok:true,text:async()=>'[]'};throw Error('unexpected write or model call');};
  const res=()=>({setHeader(){},status(n){this.code=n;return this},json(v){this.body=v}});
- try{let out=res();await job({method:'POST',headers:{authorization:'Bearer valid'}},out);assert.equal(out.code,401);policy='old-policy';out=res();await job({method:'POST',headers:{authorization:'Bearer valid'}},out);assert.equal(out.code,503);assert.equal(out.body.error,'RAW_SNAPSHOT_MISSING');}finally{global.fetch=before;keys.forEach((k,i)=>saved[i]===undefined?delete process.env[k]:process.env[k]=saved[i]);}
+ const request=Object.create({headers:{authorization:'Bearer valid'}});request.method='POST';
+ try{let out=res();await job(request,out);assert.equal(out.code,401);policy='old-policy';out=res();await job(request,out);assert.equal(out.code,503);assert.equal(out.body.error,'RAW_SNAPSHOT_MISSING');}finally{global.fetch=before;keys.forEach((k,i)=>saved[i]===undefined?delete process.env[k]:process.env[k]=saved[i]);}
 });

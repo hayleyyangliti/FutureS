@@ -20,15 +20,15 @@ function dayStart(ms=Date.now()){return Date.parse(chinaDate(ms)+'T00:00:00+08:0
 function priorTradingDay(ms){let d=dayStart(ms)-DAY;const holidays=new Set((process.env.HOTSPOT_TRADING_HOLIDAYS||'').split(','));while([0,6].includes(new Date(d+ZONE).getUTCDay())||holidays.has(chinaDate(d)))d-=DAY;return d;}
 function collectionWindow(version,previous=null,now=Date.now()){
   const at=now,date=chinaDate(at),old=previous?.payload?.collectionWindow||previous?.collectionWindow;
-  if(old?.tradingDate===date&&Date.parse(previous?.source_refreshed_at)===Date.parse(version)&&Date.parse(old.allowOvernightUntil)>now)return old;
+  if(old?.version===2&&old.tradingDate===date&&Date.parse(previous?.source_refreshed_at)===Date.parse(version)&&Date.parse(old.allowOvernightUntil)>now)return old;
   const previousDate=old?.tradingDate||(Number.isFinite(Date.parse(previous?.source_refreshed_at))?chinaDate(Date.parse(previous.source_refreshed_at)):null);
   const first=previousDate!==date;
   const close=/^\d{2}:\d{2}$/.test(process.env.HOTSPOT_MARKET_CLOSE||'')?process.env.HOTSPOT_MARKET_CLOSE:'15:00';
   const start=first?Date.parse(chinaDate(priorTradingDay(at))+'T'+close+':00+08:00'):dayStart(at);
-  return {tradingDate:date,firstOfDay:first,start:new Date(start).toISOString(),end:new Date(at).toISOString(),allowOvernightUntil:first?new Date(now+35*60000).toISOString():null};
+  return {version:2,tradingDate:date,firstOfDay:first,start:new Date(start).toISOString(),end:new Date(at).toISOString(),allowOvernightUntil:first?new Date(now+35*60000).toISOString():null};
 }
 function displayWindow(window,now=Date.now()){
-  const overnight=window?.firstOfDay&&window.tradingDate===chinaDate(now)&&Date.parse(window.allowOvernightUntil)>now;
+  const overnight=window?.version===2&&window.firstOfDay&&window.tradingDate===chinaDate(now)&&Date.parse(window.allowOvernightUntil)>now;
   return {start:overnight?window.start:new Date(dayStart(now)).toISOString(),end:new Date(now).toISOString()};
 }
 function inWindow(value,window){const ms=Date.parse(value||'');return Number.isFinite(ms)&&ms>=Date.parse(window.start)&&ms<=Date.parse(window.end);}
