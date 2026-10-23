@@ -18,7 +18,13 @@ module.exports=async(req,res)=>{
   res.setHeader('Cache-Control','private, no-store');
   if(req.method!=='POST')return send(res,405,{error:'METHOD_NOT_ALLOWED'});
   let permitted=authorized(req);
-  if(!permitted){try{permitted=(await currentProfile(req)).profile.role==='developer';}catch(_){}}
+  if(!permitted){try{
+    // A signed-in reader may refresh an obsolete computed cache, but cannot
+    // author content or force a completed current-policy ranking to rerun.
+    const {profile}=await currentProfile({...req,method:'GET'}),existing=await readRanking();
+    const needsUpgrade=existing?.payload?.policyVersion!==POLICY||existing?.payload?.pipeline?.modelStats?.pending>0||existing?.payload?.pipeline?.modelStats?.summaryPending>0;
+    permitted=profile.role==='developer'||needsUpgrade;
+  }catch(_){}}
   if(!permitted)return send(res,401,{error:'UNAUTHORIZED'});
   let key,token,progress={};
   try{

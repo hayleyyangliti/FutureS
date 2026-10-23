@@ -236,7 +236,7 @@ refreshBtn.addEventListener('click',async()=>{
     try{
       const response=await fetch('/api/market-hotspots',{headers:{Authorization:`Bearer ${token}`}});
       let payload=await response.json();if(!response.ok)throw new Error(payload.error||'UNAVAILABLE');
-      if(payload.pipeline?.policyRefreshPending&&currentAccount?.role==='developer'){
+      if(payload.pipeline?.policyRefreshPending&&currentAccount){
         setBusy(refreshBtn,true,'按新规则重算中…');
         const rebuilt=await fetch('/api/internal/hotspot-refresh',{method:'POST',headers:{Authorization:`Bearer ${token}`}});
         if(!rebuilt.ok)throw Error('RANKING_REFRESH_FAILED');

@@ -66,3 +66,10 @@ test('official RSS and Chinese official listing parser preserve real article ide
  assert.equal(parseFeed('<a href="./202610/t20261023_123.html">国家统计局公布工业数据</a>',{kind:'html',url:'https://www.stats.gov.cn/sj/zxfb/'})[0].url,'https://www.stats.gov.cn/sj/zxfb/202610/t20261023_123.html');
 });
 test('all inline browser scripts remain syntactically valid',()=>{const html=fs.readFileSync(require('node:path').join(__dirname,'../public/index.html'),'utf8');for(const match of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)){if(match[1].trim())new vm.Script(match[1]);}});
+test('reader cache refresh is allowed only for obsolete or incomplete rankings',async()=>{
+ const before=global.fetch,keys=['SUPABASE_URL','SUPABASE_ANON_KEY','SUPABASE_SERVICE_ROLE_KEY'],saved=keys.map(k=>process.env[k]);Object.assign(process.env,{SUPABASE_URL:'https://test.supabase.co',SUPABASE_ANON_KEY:'test',SUPABASE_SERVICE_ROLE_KEY:'test'});
+ let policy=P.POLICY;
+ global.fetch=async(url)=>{const s=String(url);if(s.endsWith('/rpc/current_profile'))return {ok:true,json:async()=>[{auth_user_id:'viewer',email_prefix:'futures',role:'user'}]};if(s.includes('/omnidata_hotspot_rankings?'))return {ok:true,text:async()=>JSON.stringify([{payload:{policyVersion:policy,pipeline:{modelStats:{pending:0,summaryPending:0}}}}])};if(s.includes('/omnidata_news_snapshots?'))return {ok:true,text:async()=>'[]'};throw Error('unexpected write or model call');};
+ const res=()=>({setHeader(){},status(n){this.code=n;return this},json(v){this.body=v}});
+ try{let out=res();await job({method:'POST',headers:{authorization:'Bearer valid'}},out);assert.equal(out.code,401);policy='old-policy';out=res();await job({method:'POST',headers:{authorization:'Bearer valid'}},out);assert.equal(out.code,503);assert.equal(out.body.error,'RAW_SNAPSHOT_MISSING');}finally{global.fetch=before;keys.forEach((k,i)=>saved[i]===undefined?delete process.env[k]:process.env[k]=saved[i]);}
+});

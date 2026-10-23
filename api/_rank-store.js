@@ -16,7 +16,7 @@ function rankingResponse(row){
   const {_pool,...payload}=row.payload||{},items=publishable(payload.items,displayWindow(payload.collectionWindow)).map(({scoringReasons,scoringEvidence,reports,summaryEvidence,summaryInputKey,...item})=>item);
   return {...payload,items,sourceStatus:(payload.sourceStatus||[]).filter(s=>!/jin10|金十|eastmoney|东方财富/i.test((s.spider||'')+' '+(s.label||''))),refreshedAt:row.source_refreshed_at,rankedAt:row.generated_at,
     stale:Date.now()-Date.parse(row.source_refreshed_at)>65*60*1000,
-    pipeline:{...payload.pipeline,mode:'BACKGROUND_RANKING',displayed:items.length,policyVersion:POLICY,policyRefreshPending:payload.policyVersion!==POLICY,excludedAtRead:(payload.items||[]).length-items.length,domesticDisplayed:items.filter(x=>x.scope==='domestic').length,internationalDisplayed:items.filter(x=>x.scope==='international').length,primaryDisplayed:items.filter(x=>x.grade==='A类信源').length},ai:{...payload.ai,qualityStatus:payload.ai?.status,status:'PRECOMPUTED'}};
+    pipeline:{...payload.pipeline,mode:'BACKGROUND_RANKING',displayed:items.length,policyVersion:POLICY,policyRefreshPending:payload.policyVersion!==POLICY||payload.pipeline?.modelStats?.pending>0||payload.pipeline?.modelStats?.summaryPending>0,excludedAtRead:(payload.items||[]).length-items.length,domesticDisplayed:items.filter(x=>x.scope==='domestic').length,internationalDisplayed:items.filter(x=>x.scope==='international').length,primaryDisplayed:items.filter(x=>x.grade==='A类信源').length},ai:{...payload.ai,qualityStatus:payload.ai?.status,status:'PRECOMPUTED'}};
 }
 module.exports={readRanking,claimJob,readCheckpoints,saveProgress,publishRanking,finishJob,rankingResponse};
 
