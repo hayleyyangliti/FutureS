@@ -4,7 +4,7 @@ const {mergeGroups}=require('../api/_event-consolidation');
 const original='主管部门宣布，自11月起实施煤炭进口通关优化，新增夜间通关时段，提升口岸通行效率。';
 const rewritten='主管部门将从11月调整煤炭进口通关安排，增加夜间作业时段，以提升口岸通行效率。';
 const item=id=>({id,title:'煤炭进口通关安排优化',summary:original,source:'财联社',sources:[{name:'财联社',url:'https://example.com/'+id}],reports:[{source:'财联社',summary:original}],score:79,scoring:{importance:35,timeliness:25,informationGain:10,futuresRelevance:9}});
-const row=input=>({id:input.id,summary:rewritten,evidence:[{reportId:input.reports[0].reportId,quote:'新增夜间通关时段，提升口岸通行效率'}]});
+const row=input=>({id:input.id,title:input.title,summary:rewritten,evidence:[{reportId:input.reports[0].reportId,quote:'新增夜间通关时段，提升口岸通行效率'}]});
 test('model summaries require real quotes and reject copied text, templates and invented numbers',()=>{
  const inputs=[evidenceInput(item('a'))],valid=row(inputs[0]);assert.equal(validateSummaries(inputs,{items:[valid]}).size,1);
  for(const summary of [original,'主要事实（财联社）：'+rewritten,rewritten+'通关增长99%。'])assert.equal(validateSummaries(inputs,{items:[{...valid,summary}]}).size,0);
@@ -51,10 +51,11 @@ test('background worker saves model summaries without changing ranking scores or
   if(path.includes('/omnidata_hotspot_jobs?')){finished=JSON.parse(options.body);return db(null);}
   if(path.includes('/rpc/publish_omnidata_hotspot_ranking')){published=JSON.parse(options.body).p_payload;return db(true);}
   const body=JSON.parse(options.body),inputs=JSON.parse(body.messages[1].content).items;
-  const rows=body.messages[0].content.includes('财经新闻编辑')?inputs.map(row):inputs.map(x=>({id:x.id,admit:true,importance:35,informationGain:10,futuresRelevance:9,reasons:{importance:'政策事实',informationGain:'新通关安排',futuresRelevance:'煤炭供给'},evidence:'新增夜间通关时段',scope:'domestic',category:'黑色',contracts:['焦煤'],eventKey:'11月煤炭进口通关安排'}));
+  const rows=body.messages[0].content.includes('财经新闻编辑')?inputs.map(row):inputs.map(x=>({id:x.id,admit:true,importance:35,informationGain:10,futuresRelevance:20,theme:'logistics',reasons:{importance:'政策事实',informationGain:'新通关安排',futuresRelevance:'煤炭供给'},evidence:'新增夜间通关时段',scope:'domestic',category:'黑色',contracts:['焦煤'],eventKey:'11月煤炭进口通关安排'}));
   return {ok:true,json:async()=>({choices:[{message:{content:JSON.stringify({items:rows})}}]})};
  };
  try{const res={setHeader(){},status(code){this.code=code;return this},json(value){this.body=value}};await handler({method:'POST',headers:{authorization:'Bearer test'}},res);
- assert.equal(res.code,200);assert.equal(published.items[0].summary,rewritten);assert.equal(published.items[0].score,79);assert.equal(published.items[0].sources[0].url,'https://www.cls.cn/detail/123456');assert.equal(finished.status,'completed');assert.equal(finished.detail.stats.summaryPending,0);
+ assert.equal(res.code,200);assert.equal(published.items[0].summary,rewritten);assert.equal(published.items[0].score,85);assert.equal(published.items[0].sources[0].url,'https://www.cls.cn/detail/123456');assert.equal(finished.status,'completed');assert.equal(finished.detail.stats.summaryPending,0);
  }finally{global.fetch=before;names.forEach((name,i)=>old[i]===undefined?delete process.env[name]:process.env[name]=old[i]);}
 });
+

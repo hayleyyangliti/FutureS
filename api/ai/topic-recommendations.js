@@ -65,8 +65,10 @@ module.exports = async (req, res) => {
     return send(res, 200, result);
   } catch (error) {
     if (error.message === 'UNAUTHORIZED') return send(res, 401, { error: 'UNAUTHORIZED' });
+    if (error.message === 'READ_ONLY_ACCOUNT') return send(res, 403, { error: 'READ_ONLY_ACCOUNT' });
     console.warn('Topic recommendations unavailable', { name: error.name, code: error.message });
     return send(res, 503, { error: 'TOPIC_RECOMMENDATIONS_UNAVAILABLE' });
   }
 };
 module.exports._test = { cleanItems, cleanCases, validate, recommend };
+

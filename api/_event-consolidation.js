@@ -10,14 +10,14 @@ function mergeGroups(events,groups){
   const known=new Map(events.map(item=>[item.id,item]));
   return groups.map(group=>{
     const members=group.ids.map(id=>known.get(id)).sort((a,b)=>b.score-a.score),primary=members[0];
-    const sources=[...new Map(members.flatMap(item=>item.sources||[]).map(source=>[source.name,source])).values()].slice(0,3);
+    const sources=[...new Map(members.flatMap(item=>item.sources||[]).map(source=>[source.name,source])).values()].sort((a,b)=>Number(b.grade==='A类信源')-Number(a.grade==='A类信源')).slice(0,3);
     const summaries=[];
     for(const member of members.flatMap(item=>item.reports||[item])){const value=member.summary?.trim();if(value&&!summaries.some(row=>row.value===value)){summaries.push({source:member.source,value});}}
     const publishedAt=members.map(item=>item.publishedAt).filter(value=>Number.isFinite(Date.parse(value))).sort()[0]||primary.publishedAt;
     const scoring={...primary.scoring,timeliness:timeScore(publishedAt)};scoring.total=scoring.importance+scoring.timeliness+scoring.informationGain+scoring.futuresRelevance;
     // Grouping keeps raw evidence for the separate model summarizer. Do not
     // concatenate excerpts and present that concatenation as a synthesis.
-    return {...primary,summary:primary.summary,summaryType:primary.summaryType,reports:summaries.map(row=>({source:row.source,summary:row.value})),sources,publishedAt,scoring,score:scoring.total,
+    return {...primary,grade:sources.some(s=>s.grade==='A类信源')?'A类信源':'B类·已核验',summary:primary.summary,summaryType:primary.summaryType,reports:summaries.map(row=>({source:row.source,summary:row.value})),sources,publishedAt,scoring,score:scoring.total,
       mergedReports:members.reduce((sum,item)=>sum+(item.mergedReports||1),0),duplicateCount:0,shortNotice:members.every(item=>item.shortNotice)};
   }).sort((a,b)=>b.score-a.score||Date.parse(b.publishedAt||0)-Date.parse(a.publishedAt||0));
 }
@@ -41,3 +41,4 @@ async function consolidateEvents(events){
   throw Error('EVENT_CONSOLIDATION_FAILED');
 }
 module.exports={consolidateEvents,validateGroups,mergeGroups};
+

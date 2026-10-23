@@ -45,9 +45,11 @@ module.exports = async (req, res) => {
     const profileRows = await profileResponse.json().catch(() => []);
     const profile = Array.isArray(profileRows) ? profileRows[0] : null;
     if (!profile) return send(res, 403, { error: 'PROFILE_NOT_FOUND' });
+    if(tokenData.user?.app_metadata?.access_mode==='viewer'||profile.email_prefix?.toLowerCase()==='futures')profile.role='viewer';
     return send(res, 200, { accessToken: tokenData.access_token, profile });
   } catch (error) {
     console.error('login failed', error);
     return send(res, 500, { error: 'LOGIN_UNAVAILABLE' });
   }
 };
+

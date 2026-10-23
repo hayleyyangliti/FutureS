@@ -62,7 +62,15 @@ async function currentProfile(req) {
   if (!response.ok) throw new Error('UNAUTHORIZED');
   const profile = Array.isArray(rows) ? rows[0] : null;
   if (!profile) throw new Error('PROFILE_NOT_FOUND');
+  // The RPC above validates this exact JWT. Only then read server-managed
+  // app_metadata; never authorize using editable user_metadata.
+  let claims={};try{claims=JSON.parse(Buffer.from(token.split('.')[1],'base64url').toString('utf8'));}catch(_){}
+  if(claims.app_metadata?.access_mode==='viewer'||profile.email_prefix?.toLowerCase()==='futures'){
+    profile.role='viewer';
+    if(!['GET','HEAD'].includes(req.method||'GET')){const error=new Error('READ_ONLY_ACCOUNT');error.status=403;throw error;}
+  }
   return { user: { id: profile.auth_user_id }, profile };
 }
 
 module.exports = { config, send, supabase, currentProfile };
+

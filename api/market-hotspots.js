@@ -2,6 +2,7 @@ const { currentProfile, send, supabase } = require('./_supabase');
 const { scoreHotspots } = require('./_hotspot-scoring');
 const { evaluateSnapshot, getCompletedEvaluation } = require('./_model-news');
 const { readRanking, rankingResponse } = require('./_rank-store');
+const { sourceGrade, articleLink, isRoundup, eligibleItem, collectionWindow, displayWindow, selectBalanced } = require('./_news-policy');
 
 // Reuse existing server-only model credentials. Scoring never changes source facts.
 
@@ -9,7 +10,6 @@ const { readRanking, rankingResponse } = require('./_rank-store');
 const DEFAULT_SOURCES = [
   { spider: 'yicai_quick_news', params: { page_size: 20 }, grade: 'B类·已核验', label: '第一财经' },
   { spider: 'sina_finance_news', params: { page_size: 20 }, grade: 'B类·已核验', label: '新浪财经' },
-  { spider: 'jin10_flash_news', params: { num: 20 }, grade: 'B类·已核验', label: '金十数据' },
 ];
 const MAX_SOURCES = 19;
 const MAX_ITEMS_PER_SOURCE = 30;
@@ -109,6 +109,7 @@ function scopeFor(title, summary, item = {}) {
 }
 function normalizeDate(value) {
   const raw = text(value); if (!raw) return '';
+  if(/^\d{10}(?:\d{3})?$/.test(raw))return new Date(Number(raw)*(raw.length===10?1000:1)).toISOString();
   const cleaned = raw.replace(/年|月/g, '-').replace(/日/g, '').replace(/\//g, '-');
   const local = cleaned.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)$/);
   // OmniData's pub_time values are usually China-local timestamps without an
@@ -130,7 +131,7 @@ function isMarketTape(title) {
     !/(?:宣布|决定|公布|发布|批准|签署|出台|实施|减产|增产|出口|进口|库存|报告|数据)/.test(lead);
 }
 function articleUrl(item, source) {
-  const candidates = [item?.url, item?.link, item?.news_url, item?.newsUrl, item?.article_url,
+  const candidates = [item?.original_url, item?.originalUrl, item?.url, item?.link, item?.news_url, item?.newsUrl, item?.article_url,
     item?.source_url, item?.sourceUrl, item?.href, item?.detailUrl, item?.pcInfoUrl,
     item?.infoUrl, item?.ShareUrl, item?.source_link, item?.uri, item?.entityurl];
   for (const value of candidates) {
@@ -199,16 +200,19 @@ function normalizeItem(item, source, index) {
   };
 }
 function prepareModelItem(entry, index) {
+  if (!Object.hasOwn(VERIFIED_LABELS, entry?.source || '')) return null;
   if (!entry?.item || typeof entry.item !== 'object') return null;
   const item=entry.item,fields=articleFields(item),summary=fields.sort((a,b)=>b.length-a.length)[0]||'';
   const originalTitle=text([item.title,item.news_title,item.newsTitle,item.name].find(value=>typeof value==='string'&&value.trim())||summary);
-  if (!originalTitle && !summary) return null; // Only discard records without text.
+  if ((!originalTitle && !summary) || isRoundup(originalTitle)) return null;
   const title=conciseHeadline(originalTitle),body=summary.slice(0,1200),source=VERIFIED_LABELS[entry.source]||entry.source;
-  const publishedAt=normalizeDate(item.pub_time||item.publish_time||item.publishTime||item.published_at||item.publishedAt||item.time||item.datetime||item.date);
+  const publishedAt=normalizeDate(item.pub_time||item.publish_time||item.publishTime||item.published_at||item.publishedAt||item.publish_date||item.timestamp||item.ctime||item.time||item.datetime||item.date);
   const sourceUrl=articleUrl(item,{spider:entry.source});
+  if (!articleLink(sourceUrl)) return null;
+  const grade=sourceGrade(sourceUrl);
   return {id:`raw-${index}`,title,summary:body||title,summaryType:body&&body!==title?'SOURCE_EXCERPT':'TITLE_ONLY',
-    source,spider:entry.source,sourceUrl,publishedAt,grade:'B类·已核验',contracts:[],articleChars:articleCharacterCount(item),
-    sources:[{name:source,url:sourceUrl,publishedAt,grade:'B类·已核验',title,excerpt:body.slice(0,500)}]};
+    source,spider:entry.source,sourceUrl,publishedAt,grade,contracts:[],articleChars:articleCharacterCount(item),
+    sources:[{name:source,url:sourceUrl,publishedAt,grade,title,excerpt:body.slice(0,500)}]};
 }
 // \W is ASCII-only in JavaScript and silently discards Chinese titles.
 function titleKey(value) { return text(value).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '').slice(0, 120); }
@@ -310,18 +314,7 @@ function newsScope(value) {
   if (/美国|美联储|美债|欧洲|欧盟|英国|日本|韩国|加拿大|澳大利亚|新西兰|巴西|阿根廷|俄罗斯|乌克兰|伊朗|中东|沙特|苏伊士|霍尔木兹|红海|OPEC|欧佩克|LME|芝加哥/.test(value)) return 'international';
   return 'other';
 }
-function selectCoverage(ranked, limit = 100) {
-  // Reserve up to a quarter of the available slots for each scope. Fill only
-  // from admitted reports, then keep the resulting list in score order.
-  const size = Math.min(limit, ranked.length), quota = Math.max(1, Math.floor(size / 4));
-  const reserved = new Set(['domestic', 'international'].flatMap((scope) =>
-    ranked.filter((item) => item.scope === scope).slice(0, quota)));
-  for (const item of ranked) {
-    if (reserved.size >= size) break;
-    reserved.add(item);
-  }
-  return ranked.filter((item) => reserved.has(item)).slice(0, size);
-}
+function selectCoverage(ranked, limit = 100) { return selectBalanced(ranked,limit); }
 function diagnoseFeed(entries) {
   const bySource = {};
   for (const entry of entries) {
@@ -373,14 +366,15 @@ async function listRegisteredSpiders(baseUrl, headers) {
 const VERIFIED_LABELS = {
   yicai_quick_news: '第一财经', sina_finance_news: '新浪财经',
   hexun_global_news: '和讯', futunn_flash_news: '富途牛牛',
-  wallstreetcn_global_news: '华尔街见闻', jin10_flash_news: '金十数据',
+  wallstreetcn_global_news: '华尔街见闻',
   fortune_flash_news: 'Fortune', marketwatch_flash_news: 'MarketWatch',
   '21jingji_quick_news': '21 财经', ths_10jqka_global_news: '同花顺',
-  jrj_news_flash: '金融界', eastmoney_fast_news: '东方财富',
+  jrj_news_flash: '金融界',
   cls_global_news: '财联社', xueqiu_flash_news: '雪球',
   xuangubao_flash_news: '选股宝', jiemian_flash_news: '界面新闻',
   gelonghui_flash_news: '格隆汇', investing_news: 'Investing.com',
   forbes_flash_news: '福布斯',
+  stats_official:'国家统计局', ndrc_official:'国家发展改革委', pbc_official:'中国人民银行', mof_official:'财政部', fed_official:'美联储', eia_official:'美国能源信息署',
 };
 
 module.exports = async (req, res) => {
@@ -398,12 +392,13 @@ module.exports = async (req, res) => {
     const admitted = feed.items.filter((entry) => entry && Object.hasOwn(VERIFIED_LABELS, entry.source));
     // No length, keyword, price-tape or rule-score admission is applied here.
     // Every nonempty approved-source record is submitted to the model.
-    const collected = admitted.map(prepareModelItem).filter(Boolean);
+    const window=displayWindow(null);
+    const collected = admitted.map(prepareModelItem).filter(Boolean).map(item=>eligibleItem(item,window)).filter(Boolean);
     let analysis = getCompletedEvaluation(collected)||{items:[],status:process.env.MINIMAX_API_KEY||process.env.DEEPSEEK_API_KEY?'PENDING':'MODEL_UNAVAILABLE'};
     if (req.query?.analysis === '1' || new URL(req.url || '/', 'http://localhost').searchParams.get('analysis') === '1') {
       analysis = await evaluateSnapshot(collected);
     }
-    const statuses = (Array.isArray(feed.sourceStatus) ? feed.sourceStatus : []).map((row) => ({
+    const statuses = (Array.isArray(feed.sourceStatus) ? feed.sourceStatus : []).filter(row=>Object.hasOwn(VERIFIED_LABELS,row.source)).map((row) => ({
       spider: row.source, label: VERIFIED_LABELS[row.source] || row.source,
       ok: Boolean(row.lastSuccessAt) && !row.lastError,
       count: row.lastError ? 0 : row.lastCount || 0,
@@ -451,3 +446,4 @@ module.exports = async (req, res) => {
 
 // Pure helpers are exposed for regression tests; this does not create an API route.
 module.exports._test = { VERIFIED_LABELS, prepareModelItem, normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, qualifiesShortCandidate, sameEvidence, clusterItems, score, newsScope, selectCoverage, diagnoseFeed, isArticleIdentity, scoreCandidatePool };
+

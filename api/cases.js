@@ -5,7 +5,8 @@ module.exports = async (req, res) => {
     const { profile } = await currentProfile(req);
     if (req.method === 'GET') {
       const library = req.query.library === 'personal' ? 'personal' : 'shared';
-      const rows = await supabase(`/rest/v1/content_cases?library=eq.${library}&order=saved_at.desc&select=*`, {
+      const ownerFilter=library==='personal'?`&owner_id=eq.${encodeURIComponent(profile.id)}`:'';
+      const rows = await supabase(`/rest/v1/content_cases?library=eq.${library}${ownerFilter}&order=saved_at.desc&select=*`, {
         headers: { Accept: 'application/json' },
       });
       return send(res, 200, { cases: rows });
@@ -33,6 +34,8 @@ module.exports = async (req, res) => {
     }
     return send(res, 405, { error: 'METHOD_NOT_ALLOWED' });
   } catch (error) {
+    if(error.message==='READ_ONLY_ACCOUNT')return send(res,403,{error:'READ_ONLY_ACCOUNT'});
     return send(res, error.message === 'UNAUTHORIZED' ? 401 : 500, { error: 'REQUEST_FAILED' });
   }
 };
+

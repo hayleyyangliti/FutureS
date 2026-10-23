@@ -115,6 +115,7 @@ module.exports = async (req, res) => {
     return send(res, 200, { ...generated, model, provider });
   } catch (error) {
     if (error.message === 'UNAUTHORIZED') return send(res, 401, { error: 'UNAUTHORIZED' });
+    if (error.message === 'READ_ONLY_ACCOUNT') return send(res, 403, { error: 'READ_ONLY_ACCOUNT' });
     if (error.message === 'PROFILE_NOT_FOUND') return send(res, 403, { error: 'PROFILE_NOT_FOUND' });
     if (error instanceof SyntaxError) return send(res, 400, { error: 'INVALID_REQUEST_BODY' });
     if (error.name === 'AbortError') return send(res, 504, { error: 'AI_GENERATION_TIMEOUT' });
@@ -122,3 +123,4 @@ module.exports = async (req, res) => {
     return send(res, 500, { error: 'AI_GENERATION_UNAVAILABLE' });
   }
 };
+
