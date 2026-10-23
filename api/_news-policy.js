@@ -21,7 +21,8 @@ function priorTradingDay(ms){let d=dayStart(ms)-DAY;const holidays=new Set((proc
 function collectionWindow(version,previous=null,now=Date.now()){
   const at=now,date=chinaDate(at),old=previous?.payload?.collectionWindow||previous?.collectionWindow;
   if(old?.tradingDate===date&&Date.parse(previous?.source_refreshed_at)===Date.parse(version)&&Date.parse(old.allowOvernightUntil)>now)return old;
-  const first=!old||old.tradingDate!==date;
+  const previousDate=old?.tradingDate||(Number.isFinite(Date.parse(previous?.source_refreshed_at))?chinaDate(Date.parse(previous.source_refreshed_at)):null);
+  const first=previousDate!==date;
   const close=/^\d{2}:\d{2}$/.test(process.env.HOTSPOT_MARKET_CLOSE||'')?process.env.HOTSPOT_MARKET_CLOSE:'15:00';
   const start=first?Date.parse(chinaDate(priorTradingDay(at))+'T'+close+':00+08:00'):dayStart(at);
   return {tradingDate:date,firstOfDay:first,start:new Date(start).toISOString(),end:new Date(at).toISOString(),allowOvernightUntil:first?new Date(now+35*60000).toISOString():null};

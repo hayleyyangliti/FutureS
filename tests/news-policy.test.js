@@ -33,6 +33,7 @@ test('only first daily collection includes overnight reports, respecting close b
  assert.equal(P.inWindow('2026-10-22T16:00:00+08:00',first),true);assert.equal(P.inWindow('2026-10-22T14:59:00+08:00',first),false);
  const later=P.collectionWindow('2026-10-23T09:30:00+08:00',{collectionWindow:first},at+1800000);
  assert.equal(later.firstOfDay,false);assert.equal(P.inWindow('2026-10-22T23:59:00+08:00',later),false);
+ const upgrade=P.collectionWindow('2026-10-23T09:00:00+08:00',{source_refreshed_at:'2026-10-23T08:30:00+08:00'},at);assert.equal(upgrade.firstOfDay,false);assert.equal(P.inWindow('2026-10-22T23:59:00+08:00',upgrade),false);
  assert.equal(P.inWindow('2026-10-23T08:00:00+08:00',later),true);
  const monday=P.collectionWindow('2026-10-26T09:00:00+08:00',null,Date.parse('2026-10-26T09:00:00+08:00'));
  assert.equal(monday.start,'2026-10-23T07:00:00.000Z');
