@@ -375,6 +375,7 @@ const VERIFIED_LABELS = {
   gelonghui_flash_news: '格隆汇', investing_news: 'Investing.com',
   forbes_flash_news: '福布斯',
   stats_official:'国家统计局', ndrc_official:'国家发展改革委', pbc_official:'中国人民银行', mof_official:'财政部', fed_official:'美联储', eia_official:'美国能源信息署',
+  customs_official:'海关总署', moa_official:'农业农村部', shfe_official:'上期所', dce_official:'大商所', czce_official:'郑商所',
 };
 
 module.exports = async (req, res) => {
