@@ -5,6 +5,11 @@ const FEEDS=[
  {source:'ndrc_official',label:'国家发展改革委',url:'https://www.ndrc.gov.cn/xwdt/tzgg/',kind:'html'},
  {source:'pbc_official',label:'中国人民银行',url:'https://www.pbc.gov.cn/goutongjiaoliu/113456/113469/index.html',kind:'html'},
  {source:'mof_official',label:'财政部',url:'https://www.mof.gov.cn/zhengwuxinxi/caizhengxinwen/',kind:'html'},
+ {source:'customs_official',label:'海关总署',url:'http://www.customs.gov.cn/customs/xwfb34/302425/index.html',kind:'html'},
+ {source:'moa_official',label:'农业农村部',url:'https://www.moa.gov.cn/xw/',kind:'html'},
+ {source:'shfe_official',label:'上期所',url:'https://www.shfe.com.cn/news/notice/',kind:'html'},
+ {source:'dce_official',label:'大商所',url:'https://www.dce.com.cn/dalianshangpin/sszt/4782/index.html',kind:'html'},
+ {source:'czce_official',label:'郑商所',url:'https://www.czce.com.cn/cn/sspz/H770307index_1.htm',kind:'html'},
  {source:'fed_official',label:'美联储',url:'https://www.federalreserve.gov/feeds/press_all.xml',kind:'rss'},
  {source:'eia_official',label:'美国能源信息署',url:'https://www.eia.gov/rss/press_rss.xml',kind:'rss'},
 ];
