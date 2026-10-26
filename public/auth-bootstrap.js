@@ -98,4 +98,9 @@
   };
 
   restoreSession();
+
+  const dashboardImport = document.createElement('script');
+  dashboardImport.src = '/dashboard-import.js';
+  dashboardImport.defer = true;
+  document.head.append(dashboardImport);
 })();
