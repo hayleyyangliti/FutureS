@@ -1,83 +1,45 @@
-# 期市内容引擎 · 测试发布包
+# 期市内容引擎
 
-这是一个可独立上传 GitHub、部署至 Vercel 的测试发布包。它与 `outputs` 中的 Demo 源文件相互独立；此包内的前端是副本。
+期市内容引擎将可追溯的公开财经资讯、热点筛选与 AI 内容生产流程整合为一个运营工作台。
 
-## 包内结构
+## 项目结构
 
 ```text
-public/                 网站前端和静态 Logo
+public/                 网站前端和静态资源
 api/                    Vercel 服务端接口
-supabase/schema.sql     数据表初始化脚本
-supabase/test-accounts.sql  杨莉缇、王宇测试账号资料脚本
-.env.example            Vercel 环境变量清单（无真实密钥）
+supabase/               数据表、认证与资料脚本
+.env.example            环境变量清单（不含真实密钥）
 ```
 
-## 1. 上传 GitHub
+## 部署
 
-将本文件夹内的全部内容上传至一个新的 GitHub 仓库根目录。不要上传 `.env` 或任何 Supabase 密钥。
+1. 将仓库导入 Vercel。
+2. Application Preset 选择 `Other`，Root Directory、Build Command、Output Directory 和 Install Command 均保持默认或留空。
+3. 在 Vercel 的 Production 与 Preview 环境配置以下服务端变量：
 
-## 2. 配置 Supabase
-
-1. 在 **Authentication → Users** 创建用户，并将初始密码统一设为 `123456`：
-   - `yangliti@gtht.com`
-   - `wangyu13@gtht.com`
-2. 打开 **SQL Editor**，完整运行 `supabase/schema.sql`。
-3. 再完整运行 `supabase/test-accounts.sql`。它会将两位用户分别关联为：
-   - 杨莉缇 / 工号 `130118` / 开发者
-   - 王宇 / 工号 `130117` / 开发者
-4. 最后完整运行 `supabase/auth-profile-rpc.sql`。它创建一个只允许“已登录用户读取自己资料”的安全接口，避免登录流程受 Vercel 服务端角色密钥或资料表 RLS 配置影响。
-
-最新用户资料以“用户信息汇总.xlsx”为准，共 86 人。刘宜琳（107481）的邮箱按确认修正为 liuyilin@gtht.com。先在 Authentication 创建缺少的邮箱账号，初始密码为 123456；已有账号保留当前密码。再运行 supabase/user-info-update.sql，按工号更新已创建用户的姓名、邮箱前缀、部门及关联。脚本只同步已经存在于 Authentication 的邮箱，不创建登录账号、不删除其他用户。前端使用完整邮箱登录，成功后显示中文姓名。两位固定开发者权限保留。
-
-## 3. 配置 Vercel
-
-导入 GitHub 仓库时：
-
-- **Application Preset**：`Other`
-- **Root Directory**：保持 `./`
-- **Build Command**：留空
-- **Output Directory**：留空（Vercel 会自动提供 `public/` 中的静态网站）
-- **Install Command**：留空
-
-在 **Environment Variables** 中新增以下七项，并选择 `Production and Preview`：
-
-| Key | Value 来源 |
+| Key | 用途 |
 |---|---|
-| `SUPABASE_URL` | Supabase → Project Settings → API → Project URL |
-| `SUPABASE_ANON_KEY` | Supabase → Project Settings → API → anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API → service_role key |
-| `LOGIN_EMAIL_DOMAIN` | `gtht.com` |
-| `OMNIDATA_BASE_URL` | 你的 OmniData 服务地址，例如 `https://omnidata-vercel-adapter-production.up.railway.app` |
-| `OMNIDATA_API_TOKEN` | OmniData 项目中设置的同名令牌 |
-| `MINIMAX_API_KEY` | MiniMax 开放平台生成的 API Key，仅供服务端调用 |
-| `DEEPSEEK_API_KEY` | DeepSeek 开放平台生成的 API Key，仅供服务端调用；启用 DeepSeek 时必填 |
+| `SUPABASE_URL` | Supabase 项目地址 |
+| `SUPABASE_ANON_KEY` | Supabase 匿名访问密钥 |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase 服务端角色密钥 |
+| `LOGIN_EMAIL_DOMAIN` | 允许登录的邮箱域名 |
+| `OMNIDATA_BASE_URL` | OmniData 服务地址 |
+| `OMNIDATA_API_TOKEN` | OmniData 服务令牌 |
+| `MINIMAX_API_KEY` | MiniMax 服务端 API Key |
+| `DEEPSEEK_API_KEY` | DeepSeek 服务端 API Key |
 
-可选新增 `MINIMAX_MODEL` 和 `DEEPSEEK_MODEL`。若未设置，分别调用 `MiniMax-M2.7` 和 `deepseek-flash`。已有 MiniMax 配置和默认选项保持不变。
+可选变量 `MINIMAX_MODEL` 与 `DEEPSEEK_MODEL` 用于指定模型版本。所有密钥必须只保存在 Vercel 服务端环境变量中，严禁写入前端、提交记录或公开文档。
 
-`SUPABASE_SERVICE_ROLE_KEY` 只能保存在 Vercel 服务端环境变量，绝不能粘贴到前端文件或提交 GitHub。
-`OMNIDATA_API_TOKEN` 同样只能保存在 Vercel 服务端环境变量。市场热点中心会经由 `/api/market-hotspots` 请求 OmniData，浏览器不会获得该令牌。
-`MINIMAX_API_KEY` 与 `DEEPSEEK_API_KEY` 都只由 `/api/ai/generate` 在服务端读取，浏览器不会获得密钥。AI Studio 的模型下拉框可选择 MiniMax 或 DeepSeek；“开始生成内容”会把当前选题、内容分类、生成指令和所选模型发送至服务端，由服务端调用对应模型 API。切换模型不会自动回退到另一模型。上传参考文件目前只展示文件名，尚未将文件正文解析后发送给模型。
+## 使用说明
 
-### 市场热点中心：配置准入信源
+- 登录账号由项目管理员在 Supabase Authentication 中创建并按内部权限流程配置。
+- AI Studio 默认使用 MiniMax，也可切换至 DeepSeek。
+- 内容生产会保留选题关联的、可验证的公开资料来源，并在结果末尾展示可跳转的原始链接；生成内容仍须经过人工核验后再发布。
+- 市场热点中心只展示具有可验证原文链接、满足时效性与期货相关性规则的资讯。
+- 热点缓存由 OmniData 定时同步。个别信源不可用时，系统会保留最近一次可用快照并在后台显示采集状态。
 
-采集缓存每半小时从 OmniData 获取已准入的财经来源。当前池覆盖 19 个中外财经媒体；个别来源不可用时保留已有缓存。热点筛选会识别期货品种及供应链事件，包括甘其毛都、策克和满都拉口岸、蒙煤通关、伊朗原油、霍尔木兹海峡、苏伊士运河及红海航运，并从标题与正文摘要共同判断相关性。合格资讯随后聚类去重、四维评分、分类并按分数排序为 Top 20。
+## 安全说明
 
-若部署仍使用 Vercel 直连 OmniData 的旧版采集器，可在 Vercel 配置 `OMNIDATA_HOTSPOT_SOURCES`，值为一行 JSON，例如：
-
-```json
-[
-  {"spider":"eastmoney_fast_news","params":{"page_size":20,"fast_column":"113"},"grade":"B类·已核验","label":"东方财富期货快讯"}
-]
-```
-
-每个对象的 `spider` 必须与 OmniData `GET /api/v1/spiders` 返回的名称完全一致；`params` 必须符合该爬虫的参数要求。A 类仅用于官方机构、监管、交易所及正式公告等来源；完成来源核验的财经媒体使用 B 类。不要把 API Token 放进此 JSON 或前端代码。
-
-部署后，访问 `https://你的域名/api/health`：若返回 `{ "ok": true }`，说明 Vercel 已读取到环境变量。
-
-## 当前测试范围
-
-- 已接入：邮箱＋密码登录、Supabase 用户资料和开发者角色读取。
-- 已接入：AI Studio 通过服务端调用 MiniMax 或 DeepSeek 生成内容初稿；模型输出仍必须经人工核验后再保存或发布。
-- 已预置：案例数据表与 `GET/POST /api/cases` 接口，供下一阶段将案例库交互改为真实读写。
-- 已接入：ECS 每半小时采集并将快照同步到 Supabase；登录用户点击“刷新热点”时只读取已保存快照，经聚类去重、四维评分、国内/海外覆盖选择后展示 Top 20。采集端源码及更新说明见 `server/`。
-- 后续接 Dataphin 时：由 Vercel 的服务端接口请求 Dataphin，再把数据返回前端；不要让浏览器直接持有 Dataphin 凭证。
+- 不要提交 `.env`、访问令牌、真实 API Key 或任何个人账号信息。
+- `SUPABASE_SERVICE_ROLE_KEY`、`OMNIDATA_API_TOKEN`、`MINIMAX_API_KEY` 与 `DEEPSEEK_API_KEY` 仅可用于服务端。
+- 对外发布前，请复核当前分支、环境变量、公开文档和提交历史中是否包含敏感信息。
