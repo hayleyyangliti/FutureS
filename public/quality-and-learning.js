@@ -51,7 +51,9 @@
     return response;
   };
   ['saveBtn', 'pushSaveBtn', 'copyBtn', 'copyPushContent'].forEach(id => document.getElementById(id)?.addEventListener('click', () => setTimeout(learn, 0)));
-  const removeTop5 = () => document.querySelectorAll('*').forEach(node => { if (node.children.length === 0 && node.textContent.trim() === '市场热点中心Top5') node.remove(); });
+  const removeTop5 = () => document.querySelectorAll('*').forEach(node => {
+    if (node.children.length === 0 && node.textContent.replace(/\s+/g, '') === '市场热点中心Top5') node.remove();
+  });
   removeTop5(); new MutationObserver(removeTop5).observe(document.body, { childList: true, subtree: true });
   document.addEventListener('DOMContentLoaded', renderSkillLearning); setTimeout(renderSkillLearning, 1200);
 })();
