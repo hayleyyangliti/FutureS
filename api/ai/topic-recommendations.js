@@ -37,9 +37,21 @@ function validMarketingTitle(value, sourceTitle) {
   if (title === source || (title.length >= 8 && source.includes(title))) return '';
   return title;
 }
-function fallbackMarketingTitle(item) {
-  const subject = String(item.contracts?.[0] || item.category || '期市').replace(/[“”"'：:，,。.!！?？]/g, '').slice(0, 8) || '期市';
-  return Array.from(`${subject}新变量如何影响行情？`).slice(0, 20).join('');
+function topicSubject(item) {
+  return String(item.contracts?.[0] || item.category || '期市').replace(/[“”"'：:，,。.!！?？]/g, '').slice(0, 8) || '期市';
+}
+const PRODUCT_WORDS = /黄金|白银|原油|燃料油|沥青|天然气|甲醇|PTA|橡胶|尿素|碳酸锂|铁矿石|螺纹钢|焦煤|焦炭|煤炭|豆粕|豆油|玉米|棉花|白糖|生猪|国债|股指|有色金属|黑色系|农产品|能源化工|宏观/;
+function caseTitleStyle(caseTitle, subject, index) {
+  const raw = String(caseTitle || '').replace(/\s+/g, '').replace(/20\d{2}[年\-/.]?(?:0?[1-9]|1[0-2])(?:[月\-/.]?(?:0?[1-9]|[12]\d|3[01]))?/g, '').trim();
+  if (PRODUCT_WORDS.test(raw)) {
+    const adapted = raw.replace(new RegExp(PRODUCT_WORDS.source, 'g'), subject).replace(/[-—_]+$/g, '');
+    if (Array.from(adapted).length >= 5 && Array.from(adapted).length <= 20 && !/^\d/.test(adapted)) return adapted;
+  }
+  const patterns = [`${subject}的三项关键变化`, `${subject}供需拐点，怎么读？`, `读懂${subject}的新交易线索`, `${subject}进入观察窗口`, `${subject}后市关注两条主线`];
+  return patterns[index % patterns.length];
+}
+function fallbackMarketingTitle(item, cases = [], index = 0) {
+  return Array.from(caseTitleStyle(cases[index % Math.max(cases.length, 1)]?.title, topicSubject(item), index)).slice(0, 20).join('');
 }
 function validate(items, payload) {
   const allowed = new Map(items.map(item => [item.id, item])), seen = new Set(), result = [];
@@ -79,8 +91,8 @@ async function recommend(items, cases) {
   }
   throw lastError || Error('MODEL_NOT_CONFIGURED');
 }
-function fallbackRecommendations(items) {
-  return items.slice(0, 5).map(item => ({ ...item, sourceTitle: item.title, title: fallbackMarketingTitle(item) }));
+function fallbackRecommendations(items, cases = []) {
+  return items.slice(0, 5).map((item, index) => ({ ...item, sourceTitle: item.title, title: fallbackMarketingTitle(item, cases, index) }));
 }
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'private, no-store');
@@ -92,7 +104,7 @@ module.exports = async (req, res) => {
     if (!items.length) return send(res, 400, { error: 'NO_HOTSPOTS' });
     let result;
     try { result = await recommend(items, cases); }
-    catch (_) { result = { recommendations: fallbackRecommendations(items), provider: '规则兜底', model: '规则题目生成' }; }
+    catch (_) { result = { recommendations: fallbackRecommendations(items, cases), provider: '案例风格兜底', model: '案例题目生成' }; }
     return send(res, 200, result);
   } catch (error) {
     if (error.message === 'UNAUTHORIZED') return send(res, 401, { error: 'UNAUTHORIZED' });
@@ -101,5 +113,5 @@ module.exports = async (req, res) => {
     return send(res, 503, { error: 'TOPIC_RECOMMENDATIONS_UNAVAILABLE' });
   }
 };
-module.exports._test = { cleanItems, cleanCases, validate, recommend, validMarketingTitle, fallbackMarketingTitle, fallbackRecommendations };
+module.exports._test = { cleanItems, cleanCases, validate, recommend, validMarketingTitle, topicSubject, caseTitleStyle, fallbackMarketingTitle, fallbackRecommendations };
 
