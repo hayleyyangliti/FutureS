@@ -10,6 +10,10 @@ function cleanItems(value) {
     id: item.id.slice(0, 120), title: item.title.slice(0, 120), summary: String(item.summary || '').slice(0, 500),
     score: Number(item.score) || 0, rank: index + 1, category: String(item.category || '').slice(0, 40),
     contracts: Array.isArray(item.contracts) ? item.contracts.slice(0, 4).map(x => String(x).slice(0, 20)) : [],
+    sources: Array.isArray(item.sources) ? item.sources.map(source => ({
+      name: String(source?.name || '').slice(0, 120), title: String(source?.title || '').slice(0, 240),
+      url: String(source?.url || '').slice(0, 2048), publishedAt: String(source?.publishedAt || '').slice(0, 80),
+    })).filter(source => /^https?:\/\//i.test(source.url)).slice(0, 5) : [],
   }));
 }
 function cleanCases(value) {
