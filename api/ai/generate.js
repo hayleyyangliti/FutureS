@@ -23,9 +23,9 @@ function productionPrompt({ topic, instruction, contentType, subtype, candidateM
 function cleanResult(value, topic, candidateMode) { if (candidateMode) { const candidates = (value.candidates || []).map(x => ({ title: clean(x?.title, 160), body: clean(x?.body, 3000) })).filter(x => x.body).slice(0, 3); if (!candidates.length) throw Error('MODEL_INVALID_RESPONSE'); return { candidates }; } const body = clean(value.body, 12000); if (!body) throw Error('MODEL_INVALID_RESPONSE'); return { title: clean(value.title, 200) || topic || '期市内容初稿', body, sources: Array.isArray(value.sources) ? value.sources.map(x => clean(x, 200)).filter(Boolean).slice(0, 5) : [] }; }
 async function runAgents(input, provider) {
   const context = JSON.stringify({ topic: input.topic, instruction: input.instruction, contentType: input.contentType, subtype: input.subtype, learningProfile: input.learningProfile || '' });
-  const research = await ask(provider, '你是研究 Agent。只依据输入内容，提取可写事实、缺失信息、不可推断内容和期货传导边界。只输出 JSON。', `${context}\n输出 {"facts":[],"gaps":[],"boundaries":[]}`, 600);
-  const plan = await ask(provider, '你是总编辑 Agent。基于用户输入和研究结果拆解写作任务，给出内容结构、目标读者、篇幅与合规边界。只输出 JSON。', `${context}\n研究结果：${research.content}\n输出 {"outline":[],"tone":"","checks":[]}`, 650);
   const candidateMode = ['Push', '私域营销文案'].includes(input.contentType);
+  const research = await ask(provider, '你是研究 Agent。只依据输入内容，提取可写事实、缺失信息、不可推断内容和期货传导边界。只输出 JSON。', `${context}\n输出 {"facts":[],"gaps":[],"boundaries":[]}`, candidateMode ? 1200 : 2400);
+  const plan = await ask(provider, '你是总编辑 Agent。基于用户输入和研究结果拆解写作任务，给出内容结构、目标读者、篇幅与合规边界。只输出 JSON。', `${context}\n研究结果：${research.content}\n输出 {"outline":[],"tone":"","checks":[]}`, 650);
   const writer = await ask(provider, '你是内容写作 Agent。必须只输出指定 JSON，严禁捏造事实、来源、日期或数值。', productionPrompt({ ...input, candidateMode, plan: plan.content, profile: input.learningProfile }), candidateMode ? 1300 : 2800);
   const reviewer = await ask(provider, '你是审查 Agent。根据用户输入核查候选文案：删除无法由输入支持的事实、绝对化判断、投资建议和虚构来源；保留正确结构。只输出与输入完全同构的 JSON。', `用户输入：${context}\n写作初稿：${writer.content}\n输出 JSON。`, candidateMode ? 1300 : 2800);
   return { result: cleanResult(json(reviewer.content, json(writer.content, {})), input.topic, candidateMode), agentRun: [{ name: '研究君', status: 'completed' }, { name: '总编辑', status: 'completed' }, { name: '内容君', status: 'completed' }, { name: '审查君', status: 'completed' }], model: writer.model };
@@ -46,6 +46,7 @@ module.exports = async (req, res) => {
     if (error.message === 'PROFILE_NOT_FOUND') return send(res, 403, { error: 'PROFILE_NOT_FOUND' });
     if (error instanceof SyntaxError) return send(res, 400, { error: 'INVALID_REQUEST_BODY' });
     if (error.name === 'AbortError') return send(res, 504, { error: 'AI_GENERATION_TIMEOUT' });
+    if (/_NOT_CONFIGURED$/.test(error.message || '')) return send(res, 503, { error: error.message });
     if (/^(MINIMAX|DEEPSEEK|MODEL)_/.test(error.message)) return send(res, 502, { error: error.message });
     console.error('AI generation unavailable', error); return send(res, 500, { error: 'AI_GENERATION_UNAVAILABLE' });
   }
