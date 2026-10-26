@@ -103,9 +103,15 @@ function fallbackTheme(item){
 }
 function ruleFallback(item){
   const facts=`${item.title||''} ${item.summary||''}`;
-  const concreteDriver=/国务院|发改委|财政部|海关总署|农业农村部|国家统计局|人民银行|上期所|大商所|郑商所|交易所|甘其毛都|策克口岸|蒙煤|港口|钢厂|煤矿|炼厂|产量|库存|进口|出口|通关|关税|配额|收储|抛储|减产|增产|停产|复产|开工|央行|利率|CPI|PPI|GDP|PMI|苏伊士|霍尔木兹|红海/.test(facts);
+  const concreteDriver=/国务院|发改委|财政部|海关总署|农业农村部|国家统计局|人民银行|上期所|大商所|郑商所|中金所|广期所|交易所|甘其毛都|策克口岸|满都拉|蒙煤|港口|钢厂|煤矿|炼厂|产量|库存|需求|消费|进口|出口|通关|关税|配额|收储|抛储|减产|增产|停产|复产|开工|天气|旱情|洪涝|央行|利率|CPI|PPI|GDP|PMI|苏伊士|霍尔木兹|红海/.test(facts);
   const directMarket=Array.isArray(item.contracts)&&item.contracts.length>0;
-  if((item.articleChars||0)<130 || !concreteDriver || (!directMarket && !/央行|利率|CPI|PPI|GDP|PMI|财政|货币政策/.test(facts)))return null;
+  const primaryDomesticNotice=item.grade==='A类信源'&&item.scope==='domestic'&&(item.articleChars||0)>=24;
+  const longLinkedReport=(item.articleChars||0)>=130;
+  // Most flash feeds only provide a short excerpt.  A short item remains
+  // excluded unless it is an original, linked, domestic A-source notice with
+  // a concrete market driver.  All other fallback entries retain the 130-char
+  // report threshold requested for ordinary media news.
+  if((!longLinkedReport&&!primaryDomesticNotice)||!concreteDriver||(!directMarket&&!/央行|利率|CPI|PPI|GDP|PMI|财政|货币政策|进出口|采购经理指数/.test(facts)))return null;
   const theme=fallbackTheme(item),scope=item.scope||'other';
   if(theme==='geopolitics'&&!/原油|石油|天然气|航运|运河|海峡|油轮|供应|出口|进口/.test(facts))return null;
   const importance=Math.min(35,(item.grade==='A类信源'?26:17)+(scope==='domestic'?5:0)+(theme==='supply'||theme==='logistics'||theme==='inventory'?4:0));
@@ -113,7 +119,7 @@ function ruleFallback(item){
   const scoring={importance,timeliness:timeScore(item.publishedAt),informationGain,futuresRelevance};
   scoring.total=Object.values(scoring).reduce((sum,value)=>sum+value,0);
   const evidence=(item.summary||item.title||'').slice(0,80);
-  return {...item,scope,category:item.category||'宏观',theme,contracts:item.contracts||[],eventKey:`规则补充：${String(item.title||'').slice(0,60)}`,scoring,scoringWeights:{importance:35,timeliness:20,informationGain:20,futuresRelevance:25},score:scoring.total,scoringMethod:'RULE_FALLBACK',scoringProvider:'RULES',scoringModel:'deterministic-market-admission',scoringReasons:{importance:'具备可核验的政策、产业、供需或物流事实',informationGain:'原文链接可追溯，非媒体汇总',futuresRelevance:'标题或原文含有明确品种/宏观传导依据',timeliness:'按首发时间计算'},scoringEvidence:evidence,shortNotice:false};
+  return {...item,scope,category:item.category||'宏观',theme,contracts:item.contracts||[],eventKey:`规则补充：${String(item.title||'').slice(0,60)}`,scoring,scoringWeights:{importance:35,timeliness:20,informationGain:20,futuresRelevance:25},score:scoring.total,scoringMethod:'RULE_FALLBACK',scoringProvider:'RULES',scoringModel:'deterministic-market-admission',scoringReasons:{importance:'具备可核验的政策、产业、供需或物流事实',informationGain:'原文链接可追溯，非媒体汇总',futuresRelevance:'标题或原文含有明确品种/宏观传导依据',timeliness:'按首发时间计算'},scoringEvidence:evidence,shortNotice:!longLinkedReport};
 }
 function freshResult(result) {
   if(!result._events)return result;
