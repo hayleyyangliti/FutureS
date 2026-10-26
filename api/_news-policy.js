@@ -1,4 +1,4 @@
-const POLICY='futures-news-v5-links-primary-current-day';
+const POLICY='futures-news-v6-balanced-domestic-primary-top100';
 const DAY=86400000,ZONE=8*3600000;
 const DISABLED=/金十|jin10|eastmoney|东方财富/i;
 const OFFICIAL_HOSTS=['pbc.gov.cn','stats.gov.cn','ndrc.gov.cn','customs.gov.cn','mof.gov.cn','mofcom.gov.cn','moa.gov.cn','nea.gov.cn','csrc.gov.cn','shfe.com.cn','dce.com.cn','czce.com.cn','cffex.com.cn','gfex.com.cn','ine.cn','federalreserve.gov','eia.gov','bls.gov','bea.gov','usda.gov','ecb.europa.eu','boj.or.jp','imf.org','oecd.org'];
@@ -47,10 +47,17 @@ function themeOf(item){if(item.theme)return item.theme;const text=String(item.ti
 function selectBalanced(input,limit=100){
   const ranked=[...input].sort((a,b)=>(b.score||0)-(a.score||0)||Date.parse(b.publishedAt||0)-Date.parse(a.publishedAt||0));
   const size=Math.min(limit,ranked.length);if(!size)return [];
-  const selected=new Set(),counts=new Map(),geoLimit=Math.max(1,Math.floor(size*.4)),categoryLimit=Math.max(1,Math.ceil(size*.4));let geo=0;
+  const selected=new Set(),counts=new Map(),geoLimit=Math.max(1,Math.floor(size*.25)),categoryLimit=Math.max(1,Math.ceil(size*.35));let geo=0;
   const add=item=>{if(selected.has(item)||selected.size>=size)return;if(themeOf(item)==='geopolitics'&&geo>=geoLimit)return;if((counts.get(item.category)||0)>=categoryLimit)return;selected.add(item);counts.set(item.category,(counts.get(item.category)||0)+1);if(themeOf(item)==='geopolitics')geo++;};
-  for(const scope of ['domestic','international'])ranked.filter(i=>i.scope===scope).slice(0,Math.floor(size*.3)).forEach(add);
-  ranked.filter(i=>i.grade==='A类信源').slice(0,Math.max(1,Math.floor(size*.2))).forEach(add);
+  // Reserve room for both Chinese-market facts and primary-source notices
+  // before global ranking fills the remaining capacity. Quotas are capped by
+  // what was actually collected, so a quiet official-news day never blocks
+  // otherwise eligible market information.
+  const domestic=ranked.filter(i=>i.scope==='domestic');
+  const primary=ranked.filter(i=>i.grade==='A类信源');
+  domestic.slice(0,Math.min(domestic.length,Math.ceil(size*.4))).forEach(add);
+  primary.slice(0,Math.min(primary.length,Math.ceil(size*.25))).forEach(add);
+  ranked.filter(i=>i.scope==='international').slice(0,Math.min(Math.floor(size*.3),Math.ceil(size*.35))).forEach(add);
   for(const category of ['农产品','黑色','有色及贵金属','能源化工','宏观','资产配置','绿色金融及新能源','金融工程']){const candidate=ranked.find(i=>i.category===category&&themeOf(i)!=='geopolitics');if(candidate)add(candidate);}
   ranked.forEach(add);
   // Category diversity is a preference, not a reason to discard otherwise
