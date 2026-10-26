@@ -1,4 +1,4 @@
-const POLICY='futures-news-v6-balanced-domestic-primary-top100';
+const POLICY='futures-news-v7-domestic-primary-rule-backstop-top100';
 const DAY=86400000,ZONE=8*3600000;
 const DISABLED=/金十|jin10|eastmoney|东方财富/i;
 const OFFICIAL_HOSTS=['pbc.gov.cn','stats.gov.cn','ndrc.gov.cn','customs.gov.cn','mof.gov.cn','mofcom.gov.cn','moa.gov.cn','nea.gov.cn','csrc.gov.cn','shfe.com.cn','dce.com.cn','czce.com.cn','cffex.com.cn','gfex.com.cn','ine.cn','federalreserve.gov','eia.gov','bls.gov','bea.gov','usda.gov','ecb.europa.eu','boj.or.jp','imf.org','oecd.org'];
