@@ -47,7 +47,7 @@ function themeOf(item){if(item.theme)return item.theme;const text=String(item.ti
 function selectBalanced(input,limit=100){
   const ranked=[...input].sort((a,b)=>(b.score||0)-(a.score||0)||Date.parse(b.publishedAt||0)-Date.parse(a.publishedAt||0));
   const size=Math.min(limit,ranked.length);if(!size)return [];
-  const selected=new Set(),counts=new Map(),geoLimit=Math.max(1,Math.floor(size*.25)),categoryLimit=Math.max(1,Math.ceil(size*.35));let geo=0;
+  const selected=new Set(),counts=new Map(),geoLimit=Math.max(1,Math.floor(size*.4)),categoryLimit=Math.max(1,Math.ceil(size*.35));let geo=0;
   const add=item=>{if(selected.has(item)||selected.size>=size)return;if(themeOf(item)==='geopolitics'&&geo>=geoLimit)return;if((counts.get(item.category)||0)>=categoryLimit)return;selected.add(item);counts.set(item.category,(counts.get(item.category)||0)+1);if(themeOf(item)==='geopolitics')geo++;};
   // Reserve room for both Chinese-market facts and primary-source notices
   // before global ranking fills the remaining capacity. Quotas are capped by
