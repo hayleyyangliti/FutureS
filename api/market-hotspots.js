@@ -211,7 +211,8 @@ function prepareModelItem(entry, index) {
   if (!articleLink(sourceUrl)) return null;
   const grade=sourceGrade(sourceUrl);
   return {id:`raw-${index}`,title,summary:body||title,summaryType:body&&body!==title?'SOURCE_EXCERPT':'TITLE_ONLY',
-    source,spider:entry.source,sourceUrl,publishedAt,grade,contracts:[],articleChars:articleCharacterCount(item),
+    source,spider:entry.source,sourceUrl,publishedAt,grade,category:classify(`${title} ${body}`),contracts:contractsFor(`${title} ${body}`),
+    scope:newsScope(`${title} ${body}`),articleChars:articleCharacterCount(item),shortNotice:articleCharacterCount(item)<MIN_ARTICLE_CHARS,
     sources:[{name:source,url:sourceUrl,publishedAt,grade,title,excerpt:body.slice(0,500)}]};
 }
 // \W is ASCII-only in JavaScript and silently discards Chinese titles.
