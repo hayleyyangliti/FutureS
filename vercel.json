@@ -2,7 +2,8 @@
   "version": 2,
   "functions": {
     "api/market-hotspots.js": { "maxDuration": 240 },
-    "api/internal/hotspot-refresh.js": { "maxDuration": 300 }
+    "api/internal/hotspot-refresh.js": { "maxDuration": 300 },
+    "api/ai/generate.js": { "maxDuration": 180 }
   },
   "headers": [
     {
@@ -15,3 +16,4 @@
     }
   ]
 }
+
