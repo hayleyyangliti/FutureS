@@ -4,6 +4,26 @@ const ENDPOINTS = { MiniMax: 'https://api.minimaxi.com/v1/text/chatcompletion_v2
 const MAX_INPUT_LENGTH = 8000;
 const clean = (value, max = MAX_INPUT_LENGTH) => String(value || '').replace(/\u0000/g, '').trim().slice(0, max);
 function json(content, fallback = {}) { const value = String(content || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''); const start = value.indexOf('{'), end = value.lastIndexOf('}'); if (start >= 0 && end > start) try { return JSON.parse(value.slice(start, end + 1)); } catch (_) {} return fallback; }
+function cleanSourceRefs(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value.map((row) => {
+    const url = clean(row?.url, 2048);
+    try { const parsed = new URL(url); if (!/^https?:$/.test(parsed.protocol)) return null; } catch (_) { return null; }
+    const title = clean(row?.title, 240) || clean(row?.name, 120) || '原始资料';
+    const name = clean(row?.name, 120) || '公开资料';
+    const key = url.replace(/#.*$/, '');
+    if (seen.has(key)) return null;
+    seen.add(key);
+    return { title, name, url: key, publishedAt: clean(row?.publishedAt, 80) };
+  }).filter(Boolean).slice(0, 5);
+}
+function hasEmoji(value) { return /\p{Extended_Pictographic}/u.test(String(value || '')); }
+function ensurePrivateMarketingEmoji(value) {
+  const body = clean(value, 3000);
+  if (!body) return body;
+  return hasEmoji(body) ? body : `📌 ${body}\n\n✨ 关注后续公开信息与风险变化。`;
+}
 function settings(provider) { const deep = provider === 'DeepSeek', key = clean(process.env[deep ? 'DEEPSEEK_API_KEY' : 'MINIMAX_API_KEY'], 1000); if (!key) throw Error(deep ? 'DEEPSEEK_NOT_CONFIGURED' : 'MINIMAX_NOT_CONFIGURED'); return { deep, key, model: deep ? (process.env.DEEPSEEK_MODEL || 'deepseek-flash') : (process.env.MINIMAX_MODEL || 'MiniMax-M2.7') }; }
 async function ask(provider, system, user, maxTokens = 900) {
   const config = settings(provider), controller = new AbortController(), timer = setTimeout(() => controller.abort(), 40000);
@@ -18,17 +38,18 @@ async function ask(provider, system, user, maxTokens = 900) {
 }
 function productionPrompt({ topic, instruction, contentType, subtype, candidateMode, plan, profile }) {
   const format = candidateMode ? '{"candidates":[{"title":"候选标题","body":"候选正文"},{"title":"候选标题","body":"候选正文"},{"title":"候选标题","body":"候选正文"}]}' : '{"title":"内容标题","body":"可直接编辑的完整正文","sources":["用户明确提供的来源名称"]}';
-  return `请为期市内容引擎撰写中文期货市场内容。仅输出 JSON：${format}\n内容类型：${contentType}\n具体场景：${subtype || '未指定'}\n选题：${topic || '未指定'}\n生成指令：${instruction || '围绕选题生成专业、克制、可供人工编辑的内容。'}\n研究规划：${plan}\n用户已确认的表达偏好：${profile || '暂无，按专业、克制、清晰执行。'}\n硬性要求：只能基于输入事实；缺少事实时使用待核验表述，绝不杜撰数据、日期、来源或机构观点；不提供买卖指令或收益承诺；正文为纯文本；资料来源仅填写用户明确提供的名称；${contentType === 'Push' ? '每条正文35—55个汉字并以“投资有风险，入市需谨慎”收尾。' : '不在正文重复风险提示，系统将统一追加。'}`;
+  const privateRule = contentType === '私域营销文案' ? '私域营销文案必须使用 2—4 个与语义相关的 Emoji（如📌、💥、🔎、👇），首段要有阅读钩子；按“事实—影响/看点—下一步关注”写成 1—3 个短段，口语化但不夸张；不得使用“必涨、稳赚、上车、财富密码”等词，也不得把 Emoji 堆成装饰。' : '';
+  return `请为期市内容引擎撰写中文期货市场内容。仅输出 JSON：${format}\n内容类型：${contentType}\n具体场景：${subtype || '未指定'}\n选题：${topic || '未指定'}\n生成指令：${instruction || '围绕选题生成专业、克制、可供人工编辑的内容。'}\n研究规划：${plan}\n用户已确认的表达偏好：${profile || '暂无，按专业、克制、清晰执行。'}\n硬性要求：只能基于输入事实；缺少事实时使用待核验表述，绝不杜撰数据、日期、来源或机构观点；不提供买卖指令或收益承诺；正文为纯文本；资料来源仅填写用户明确提供的名称；${privateRule}${contentType === 'Push' ? '每条正文35—55个汉字并以“投资有风险，入市需谨慎”收尾。' : '不在正文重复风险提示，系统将统一追加。'}`;
 }
-function cleanResult(value, topic, candidateMode) { if (candidateMode) { const candidates = (value.candidates || []).map(x => ({ title: clean(x?.title, 160), body: clean(x?.body, 3000) })).filter(x => x.body).slice(0, 3); if (!candidates.length) throw Error('MODEL_INVALID_RESPONSE'); return { candidates }; } const body = clean(value.body, 12000); if (!body) throw Error('MODEL_INVALID_RESPONSE'); return { title: clean(value.title, 200) || topic || '期市内容初稿', body, sources: Array.isArray(value.sources) ? value.sources.map(x => clean(x, 200)).filter(Boolean).slice(0, 5) : [] }; }
+function cleanResult(value, topic, candidateMode, contentType, sourceRefs) { if (candidateMode) { const candidates = (value.candidates || []).map(x => ({ title: clean(x?.title, 160), body: contentType === '私域营销文案' ? ensurePrivateMarketingEmoji(x?.body) : clean(x?.body, 3000) })).filter(x => x.body).slice(0, 3); if (!candidates.length) throw Error('MODEL_INVALID_RESPONSE'); return { candidates, sources: sourceRefs }; } const body = clean(value.body, 12000); if (!body) throw Error('MODEL_INVALID_RESPONSE'); return { title: clean(value.title, 200) || topic || '期市内容初稿', body, sources: sourceRefs }; }
 async function runAgents(input, provider) {
-  const context = JSON.stringify({ topic: input.topic, instruction: input.instruction, contentType: input.contentType, subtype: input.subtype, learningProfile: input.learningProfile || '' });
+  const context = JSON.stringify({ topic: input.topic, instruction: input.instruction, contentType: input.contentType, subtype: input.subtype, learningProfile: input.learningProfile || '', sourceRefs: input.sourceRefs.map(({ title, name, url }) => ({ title, name, url })) });
   const candidateMode = ['Push', '私域营销文案'].includes(input.contentType);
   const research = await ask(provider, '你是研究 Agent。只依据输入内容，提取可写事实、缺失信息、不可推断内容和期货传导边界。只输出 JSON。', `${context}\n输出 {"facts":[],"gaps":[],"boundaries":[]}`, candidateMode ? 1200 : 2400);
   const plan = await ask(provider, '你是总编辑 Agent。基于用户输入和研究结果拆解写作任务，给出内容结构、目标读者、篇幅与合规边界。只输出 JSON。', `${context}\n研究结果：${research.content}\n输出 {"outline":[],"tone":"","checks":[]}`, 650);
   const writer = await ask(provider, '你是内容写作 Agent。必须只输出指定 JSON，严禁捏造事实、来源、日期或数值。', productionPrompt({ ...input, candidateMode, plan: plan.content, profile: input.learningProfile }), candidateMode ? 1300 : 2800);
   const reviewer = await ask(provider, '你是审查 Agent。根据用户输入核查候选文案：删除无法由输入支持的事实、绝对化判断、投资建议和虚构来源；保留正确结构。只输出与输入完全同构的 JSON。', `用户输入：${context}\n写作初稿：${writer.content}\n输出 JSON。`, candidateMode ? 1300 : 2800);
-  return { result: cleanResult(json(reviewer.content, json(writer.content, {})), input.topic, candidateMode), agentRun: [{ name: '研究君', status: 'completed' }, { name: '总编辑', status: 'completed' }, { name: '内容君', status: 'completed' }, { name: '审查君', status: 'completed' }], model: writer.model };
+  return { result: cleanResult(json(reviewer.content, json(writer.content, {})), input.topic, candidateMode, input.contentType, input.sourceRefs), agentRun: [{ name: '研究君', status: 'completed' }, { name: '总编辑', status: 'completed' }, { name: '内容君', status: 'completed' }, { name: '审查君', status: 'completed' }], model: writer.model };
 }
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return send(res, 405, { error: 'METHOD_NOT_ALLOWED' });
@@ -36,7 +57,7 @@ module.exports = async (req, res) => {
     await currentProfile(req);
     const raw = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {}), provider = clean(raw.model, 40) || 'MiniMax';
     if (!ENDPOINTS[provider]) return send(res, 400, { error: 'UNSUPPORTED_MODEL' });
-    const input = { topic: clean(raw.topic, 1000), instruction: clean(raw.instruction), contentType: clean(raw.contentType, 80) || '营销页面文案', subtype: clean(raw.subtype, 120), learningProfile: clean(raw.learningProfile, 1800) };
+    const input = { topic: clean(raw.topic, 1000), instruction: clean(raw.instruction), contentType: clean(raw.contentType, 80) || '营销页面文案', subtype: clean(raw.subtype, 120), learningProfile: clean(raw.learningProfile, 1800), sourceRefs: cleanSourceRefs(raw.sourceRefs) };
     if (!input.topic && !input.instruction) return send(res, 400, { error: 'GENERATION_INPUT_REQUIRED' });
     const output = await runAgents(input, provider);
     return send(res, 200, { ...output.result, model: output.model, provider, agentRun: output.agentRun });
@@ -51,4 +72,4 @@ module.exports = async (req, res) => {
     console.error('AI generation unavailable', error); return send(res, 500, { error: 'AI_GENERATION_UNAVAILABLE' });
   }
 };
-module.exports._test = { clean, json, cleanResult, productionPrompt };
+module.exports._test = { clean, json, cleanSourceRefs, ensurePrivateMarketingEmoji, cleanResult, productionPrompt };
