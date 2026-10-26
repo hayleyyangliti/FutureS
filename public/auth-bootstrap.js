@@ -103,4 +103,9 @@
   dashboardImport.src = '/dashboard-import.js';
   dashboardImport.defer = true;
   document.head.append(dashboardImport);
+
+  const qualityAndLearning = document.createElement('script');
+  qualityAndLearning.src = '/quality-and-learning.js';
+  qualityAndLearning.defer = true;
+  document.head.append(qualityAndLearning);
 })();
