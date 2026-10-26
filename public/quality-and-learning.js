@@ -55,5 +55,25 @@
     if (node.children.length === 0 && node.textContent.replace(/\s+/g, '') === '市场热点中心Top5') node.remove();
   });
   removeTop5(); new MutationObserver(removeTop5).observe(document.body, { childList: true, subtree: true });
+  // A policy revision must not depend on a user noticing the refresh button.
+  // Trigger one background rebuild for each deployed policy version, then let
+  // the normal renderer read the completed cache.  sessionStorage prevents a
+  // refresh loop when the upstream service is temporarily unavailable.
+  async function repairOutdatedHotspotCache() {
+    const token = localStorage.getItem('futures-content-engine:access-token');
+    if (!token) return;
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      const response = await nativeFetch('/api/market-hotspots', { headers });
+      const payload = await response.json();
+      const policy = payload?.pipeline?.policyVersion || 'unknown';
+      const key = `futures-hotspot-refresh-attempt:${policy}`;
+      if (!payload?.pipeline?.policyRefreshPending || sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, '1');
+      const rebuilt = await nativeFetch('/api/internal/hotspot-refresh', { method: 'POST', headers });
+      if (rebuilt.ok) window.setTimeout(() => window.location.reload(), 900);
+    } catch (_) { /* the visible feed remains usable; manual refresh can retry */ }
+  }
+  window.setTimeout(repairOutdatedHotspotCache, 1400);
   document.addEventListener('DOMContentLoaded', renderSkillLearning); setTimeout(renderSkillLearning, 1200);
 })();
