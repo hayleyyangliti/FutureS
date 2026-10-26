@@ -36,7 +36,7 @@ module.exports=async(req,res)=>{
     const previous=await readRanking(),window=collectionWindow(version,previous),official=await collectOfficial(window);
     const entries=[...feed.items,...official.items];
     const items=entries.filter(entry=>entry&&Object.hasOwn(VERIFIED_LABELS,entry.source)).map(prepareModelItem).filter(Boolean).map(item=>eligibleItem(item,window)).filter(Boolean);
-    const {analysis,records}=await evaluateResumable(items,await readCheckpoints(),{budgetMs:125000});
+    const {analysis,records}=await evaluateResumable(items,await readCheckpoints(),{budgetMs:225000});
     progress={evaluations:records,stats:analysis.stats,failures:analysis.failures};
     // Save validated decisions before consolidation, including model rejections.
     // A merge failure or a new raw snapshot must not cause all 500 to restart.
