@@ -65,7 +65,11 @@ async function currentProfile(req) {
   // The RPC above validates this exact JWT. Only then read server-managed
   // app_metadata; never authorize using editable user_metadata.
   let claims={};try{claims=JSON.parse(Buffer.from(token.split('.')[1],'base64url').toString('utf8'));}catch(_){}
-  if(claims.app_metadata?.access_mode==='viewer'||profile.email_prefix?.toLowerCase()==='futures'){
+  // This is an explicitly approved operational administrator. Keep the
+  // exception server-side; client-provided metadata is never trusted.
+  if(profile.email_prefix?.toLowerCase()==='futures'){
+    profile.role='developer';
+  } else if(claims.app_metadata?.access_mode==='viewer'){
     profile.role='viewer';
     if(!['GET','HEAD'].includes(req.method||'GET')){const error=new Error('READ_ONLY_ACCOUNT');error.status=403;throw error;}
   }
