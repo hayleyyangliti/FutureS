@@ -92,6 +92,29 @@ function timeScore(value) {
 function selectEvents(events) {
   return selectBalanced(events,100);
 }
+function fallbackTheme(item){
+  const facts=`${item.title||''} ${item.summary||''}`;
+  if(/通关|口岸|航运|运河|海峡|运费/.test(facts))return 'logistics';
+  if(/库存|储备/.test(facts))return 'inventory';
+  if(/产量|停产|复产|减产|开工|进口|出口|供应|供给/.test(facts))return 'supply';
+  if(/央行|利率|通胀|CPI|PPI|GDP|财政|货币政策|数据/.test(facts))return 'macro';
+  if(/战争|军事|袭击|停火|导弹|轰炸|战事|冲突|外交/.test(facts))return 'geopolitics';
+  return 'other';
+}
+function ruleFallback(item){
+  const facts=`${item.title||''} ${item.summary||''}`;
+  const concreteDriver=/国务院|发改委|财政部|海关总署|农业农村部|国家统计局|人民银行|上期所|大商所|郑商所|交易所|甘其毛都|策克口岸|蒙煤|港口|钢厂|煤矿|炼厂|产量|库存|进口|出口|通关|关税|配额|收储|抛储|减产|增产|停产|复产|开工|央行|利率|CPI|PPI|GDP|PMI|苏伊士|霍尔木兹|红海/.test(facts);
+  const directMarket=Array.isArray(item.contracts)&&item.contracts.length>0;
+  if((item.articleChars||0)<130 || !concreteDriver || (!directMarket && !/央行|利率|CPI|PPI|GDP|PMI|财政|货币政策/.test(facts)))return null;
+  const theme=fallbackTheme(item),scope=item.scope||'other';
+  if(theme==='geopolitics'&&!/原油|石油|天然气|航运|运河|海峡|油轮|供应|出口|进口/.test(facts))return null;
+  const importance=Math.min(35,(item.grade==='A类信源'?26:17)+(scope==='domestic'?5:0)+(theme==='supply'||theme==='logistics'||theme==='inventory'?4:0));
+  const informationGain=item.grade==='A类信源'?14:9,futuresRelevance=directMarket?17:12;
+  const scoring={importance,timeliness:timeScore(item.publishedAt),informationGain,futuresRelevance};
+  scoring.total=Object.values(scoring).reduce((sum,value)=>sum+value,0);
+  const evidence=(item.summary||item.title||'').slice(0,80);
+  return {...item,scope,category:item.category||'宏观',theme,contracts:item.contracts||[],eventKey:`规则补充：${String(item.title||'').slice(0,60)}`,scoring,scoringWeights:{importance:35,timeliness:20,informationGain:20,futuresRelevance:25},score:scoring.total,scoringMethod:'RULE_FALLBACK',scoringProvider:'RULES',scoringModel:'deterministic-market-admission',scoringReasons:{importance:'具备可核验的政策、产业、供需或物流事实',informationGain:'原文链接可追溯，非媒体汇总',futuresRelevance:'标题或原文含有明确品种/宏观传导依据',timeliness:'按首发时间计算'},scoringEvidence:evidence,shortNotice:false};
+}
 function freshResult(result) {
   if(!result._events)return result;
   const events=result._events.map(item=>{const scoring={...item.scoring,timeliness:timeScore(item.publishedAt)};scoring.total=scoring.importance+scoring.timeliness+scoring.informationGain+scoring.futuresRelevance;return {...item,scoring,score:scoring.total};});
@@ -112,6 +135,16 @@ function aggregate(items, batches) {
         scoringMethod:'MODEL',scoringProvider:row._provider||batch.provider,scoringModel:row._model||batch.model,scoringReasons:{...row.reasons,timeliness:'首发15分钟内20分、1小时18分、4小时15分、8小时10分、当天其余5分；过期资讯不展示。'},scoringEvidence:row.evidence,
         shortNotice:item.articleChars<130});
     }
+  }
+  // Models are the primary reviewer. A conservative deterministic backstop
+  // prevents temporary model under-admission from turning a 100-item market
+  // feed into a handful of foreign headlines. It accepts only full-length,
+  // linked, pre-screened reports with an explicit domestic/market driver.
+  const approvedIds=new Set(approved.map(item=>item.id));
+  for(const item of items){
+    if(approvedIds.has(item.id))continue;
+    const fallback=ruleFallback(item);
+    if(fallback){approved.push(fallback);approvedIds.add(item.id);}
   }
   // Event membership is supplied by the model, not title similarity thresholds.
   const groups=new Map();
