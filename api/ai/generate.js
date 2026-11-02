@@ -1,4 +1,4 @@
-const { currentProfile, send } = require('../_supabase');
+const { currentProfile, send, supabase } = require('../_supabase');
 
 const ENDPOINTS = { MiniMax: 'https://api.minimaxi.com/v1/text/chatcompletion_v2', DeepSeek: 'https://api.deepseek.com/chat/completions' };
 const MAX_INPUT_LENGTH = 8000;
@@ -6,11 +6,41 @@ const MAX_INPUT_LENGTH = 8000;
 // deliberately server-side: the browser can describe a task, but cannot
 // change what an Agent is allowed to infer or publish.
 const AGENT_SOULS = {
-  '研究君': '你是研究君。只基于用户提供的事实、公开来源和研报/资料摘要工作。先抽取事实与时间点，再给出期货品种的供需、宏观、政策、库存、运力或风险传导；明确区分事实、合理推演和待核验项。不得补写不存在的研报结论、数据、机构观点或投资建议。',
-  '总编辑': '你是总编辑。把研究结果转换为可执行的内容任务：确定目标读者、核心问题、表达结构、篇幅、场景和合规边界；只保留有事实支撑的信息，要求内容君遵循对应案例的品牌表达，但不得照抄案例事实。',
-  '内容君': '你是内容君。必须阅读输入的案例库样本，学习其标题长度、段落节奏、专业程度、品牌语气和固定风险提示的使用方式；只借鉴表达风格，不复制案例中的事实、数据或观点。按总编辑任务与研究君事实完成可编辑初稿。',
-  '审查君': '你是审查君。逐项核验成稿中的事实是否来自研究君或用户输入；删除无法证实的数字、日期、来源、绝对化判断、收益承诺和交易指令；检查题目、正文、风险提示和资料来源格式。宁可使用“待核验”也不补造信息。',
+  '研究君': `你是研究君，是期货研究与证据核验的第一责任人。
+任务范围：只基于用户提供的材料、可追溯公开来源、研报摘要与明确的来源链接工作；提取事件主体、发生时间、事实表述、数量/价格/比例、影响品种及信息有效期。
+分析框架：依次判断供给、需求、库存、物流、成本、宏观、政策、汇率、地缘风险与市场预期的传导路径；指出直接影响、可能的二阶影响与尚无证据支持的推断。
+输出要求：分开输出“已核验事实、研究分析、待补资料、风险边界”；每项分析必须能回溯到输入事实，不确定内容标注“待核验”。
+禁止事项：不得虚构研报观点、机构结论、数据、日期、来源或行情；不得给出买卖指令、收益承诺或确定性价格判断。`,
+  '总编辑': `你是总编辑，是生产链路的任务编排与质量责任人。
+任务范围：接收选题、内容类型、受众、发布场景、来源与研究结果；明确内容要解决的核心问题，决定是否适合生产以及应采用的表达角度。
+编排规则：根据内容形式输出目标读者、标题方向、信息优先级、文章/短文结构、建议篇幅、语气、行动引导与逐项核验清单；研究证据不足时要求收缩表达或使用待核验表述。
+协作规则：只向内容君交付有事实边界的任务；要求内容君读取匹配案例的品牌风格，但不得借用案例中的事实或过时结论；将审查君作为发布前的必经环节。
+禁止事项：不得自行补写研究信息、数字、来源或交易建议；不得以营销需要突破事实边界、合规要求或风险提示规则。`,
+  '内容君': `你是内容君，是品牌化内容表达与可编辑初稿的第一责任人。
+输入使用：必须先读取总编辑任务、研究君事实边界和同内容类型/场景的案例库样本；样本只能用于学习标题长度、段落节奏、术语密度、品牌语气、排版习惯和风险提示位置。
+写作规则：围绕一个核心结论组织“事实—影响/解读—后续关注”；不同内容形式严格匹配字数、结构和语气要求；私域营销文案使用克制且相关的 Emoji，Push 保持短、清楚、单一重点。
+质量标准：所有事实、数字、日期、来源和机构观点必须来自研究输入；语言专业、清晰、可供人工编辑；无来源的判断必须降级为条件性或待核验表述。
+禁止事项：不得复制案例事实、数据、观点或过时结论；不得制造标题党、收益承诺、交易指令、绝对化行情判断或虚构来源。`,
+  '审查君': `你是审查君，是发布前事实、合规、来源与风险提示的最后责任人。
+核验范围：逐句将初稿与研究结果、原始输入和来源列表比对；重点检查主体、时间、数字、因果关系、品种映射、机构名称、资料来源、标题承诺与风险提示。
+处置规则：删除或改写无法支撑的表述；将不确定内容改为“待核验”或条件性描述；保留符合证据边界的内容结构；确认资料来源只包含可跳转、可追溯的原文链接。
+合规红线：禁止收益承诺、确定性涨跌、直接交易指令、夸大宣传、伪造来源与遗漏必要风险提示；期货内容须避免让读者误解为投资建议。
+输出标准：返回与初稿同构、可直接编辑的成稿；如无合格证据，不以补造内容替代核验。`,
 };
+const SOUL_NAMES = Object.keys(AGENT_SOULS);
+async function activeSouls() {
+  // Global Soul settings are stored server-side.  A missing configuration is
+  // intentionally harmless: production falls back to the reviewed defaults.
+  try {
+    const rows = await supabase('/rest/v1/prompt_overrides?owner_id=is.null&prompt_key=like.agent_soul%3A%25&select=prompt_key,content');
+    return (Array.isArray(rows) ? rows : []).reduce((souls, row) => {
+      const name = String(row.prompt_key || '').replace(/^agent_soul:/, '');
+      const content = clean(row.content, 12000);
+      if (SOUL_NAMES.includes(name) && content) souls[name] = content;
+      return souls;
+    }, { ...AGENT_SOULS });
+  } catch (_) { return { ...AGENT_SOULS }; }
+}
 const clean = (value, max = MAX_INPUT_LENGTH) => String(value || '').replace(/\u0000/g, '').trim().slice(0, max);
 function json(content, fallback = {}) { const value = String(content || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''); const start = value.indexOf('{'), end = value.lastIndexOf('}'); if (start >= 0 && end > start) try { return JSON.parse(value.slice(start, end + 1)); } catch (_) {} return fallback; }
 function cleanSourceRefs(value) {
@@ -54,20 +84,21 @@ async function ask(provider, system, user, maxTokens = 900) {
     return { content, model: config.model };
   } finally { clearTimeout(timer); }
 }
-function productionPrompt({ topic, instruction, contentType, subtype, candidateMode, plan, profile, caseExamples }) {
+function productionPrompt({ topic, instruction, contentType, subtype, candidateMode, plan, profile, caseExamples, souls }) {
   const format = candidateMode ? '{"candidates":[{"title":"候选标题","body":"候选正文"},{"title":"候选标题","body":"候选正文"},{"title":"候选标题","body":"候选正文"}]}' : '{"title":"内容标题","body":"可直接编辑的完整正文","sources":["用户明确提供的来源名称"]}';
   const privateRule = contentType === '私域营销文案' ? '私域营销文案必须使用 2—4 个与语义相关的 Emoji（如📌、💥、🔎、👇），首段要有阅读钩子；按“事实—影响/看点—下一步关注”写成 1—3 个短段，口语化但不夸张；不得使用“必涨、稳赚、上车、财富密码”等词，也不得把 Emoji 堆成装饰。' : '';
-  return `${AGENT_SOULS['内容君']}\n\n请为期市内容引擎撰写中文期货市场内容。仅输出 JSON：${format}\n内容类型：${contentType}\n具体场景：${subtype || '未指定'}\n选题：${topic || '未指定'}\n生成指令：${instruction || '围绕选题生成专业、克制、可供人工编辑的内容。'}\n研究规划：${plan}\n用户已确认的表达偏好：${profile || '暂无，按专业、克制、清晰执行。'}\n案例库样本（只学习风格，不可复用其中事实）：${JSON.stringify(caseExamples || [])}\n硬性要求：只能基于输入事实；缺少事实时使用待核验表述，绝不杜撰数据、日期、来源或机构观点；不提供买卖指令或收益承诺；正文为纯文本；资料来源仅填写用户明确提供的名称；${privateRule}${contentType === 'Push' ? '每条正文35—55个汉字并以“投资有风险，入市需谨慎”收尾。' : '不在正文重复风险提示，系统将统一追加。'}`;
+  return `${souls['内容君']}\n\n请为期市内容引擎撰写中文期货市场内容。仅输出 JSON：${format}\n内容类型：${contentType}\n具体场景：${subtype || '未指定'}\n选题：${topic || '未指定'}\n生成指令：${instruction || '围绕选题生成专业、克制、可供人工编辑的内容。'}\n研究规划：${plan}\n用户已确认的表达偏好：${profile || '暂无，按专业、克制、清晰执行。'}\n案例库样本（只学习风格，不可复用其中事实）：${JSON.stringify(caseExamples || [])}\n硬性要求：只能基于输入事实；缺少事实时使用待核验表述，绝不杜撰数据、日期、来源或机构观点；不提供买卖指令或收益承诺；正文为纯文本；资料来源仅填写用户明确提供的名称；${privateRule}${contentType === 'Push' ? '每条正文35—55个汉字并以“投资有风险，入市需谨慎”收尾。' : '不在正文重复风险提示，系统将统一追加。'}`;
 }
 function cleanResult(value, topic, candidateMode, contentType, sourceRefs) { if (candidateMode) { const candidates = (value.candidates || []).map(x => ({ title: clean(x?.title, 160), body: contentType === '私域营销文案' ? ensurePrivateMarketingEmoji(x?.body) : clean(x?.body, 3000) })).filter(x => x.body).slice(0, 3); if (!candidates.length) throw Error('MODEL_INVALID_RESPONSE'); return { candidates, sources: sourceRefs }; } const body = clean(value.body, 12000); if (!body) throw Error('MODEL_INVALID_RESPONSE'); return { title: clean(value.title, 200) || topic || '期市内容初稿', body, sources: sourceRefs }; }
 async function runAgents(input, provider) {
+  const souls = await activeSouls();
   const context = JSON.stringify({ topic: input.topic, instruction: input.instruction, contentType: input.contentType, subtype: input.subtype, learningProfile: input.learningProfile || '', sourceRefs: input.sourceRefs.map(({ title, name, url }) => ({ title, name, url })), caseExamples: input.caseExamples });
   const candidateMode = ['Push', '私域营销文案'].includes(input.contentType);
-  const research = await ask(provider, AGENT_SOULS['研究君'], `${context}\n只输出 {"facts":[],"researchAnalysis":[],"gaps":[],"boundaries":[]}`, candidateMode ? 1200 : 2400);
-  const plan = await ask(provider, AGENT_SOULS['总编辑'], `${context}\n研究结果：${research.content}\n只输出 {"outline":[],"audience":"","tone":"","checks":[]}`, 700);
-  const writer = await ask(provider, AGENT_SOULS['内容君'], productionPrompt({ ...input, candidateMode, plan: plan.content, profile: input.learningProfile, caseExamples: input.caseExamples }), candidateMode ? 1300 : 2800);
-  const reviewer = await ask(provider, AGENT_SOULS['审查君'], `用户输入：${context}\n研究结果：${research.content}\n总编辑任务：${plan.content}\n写作初稿：${writer.content}\n只输出与写作初稿完全同构的 JSON。`, candidateMode ? 1300 : 2800);
-  return { result: cleanResult(json(reviewer.content, json(writer.content, {})), input.topic, candidateMode, input.contentType, input.sourceRefs), agentRun: Object.keys(AGENT_SOULS).map((name) => ({ name, status: 'completed', soul: AGENT_SOULS[name] })), model: writer.model };
+  const research = await ask(provider, souls['研究君'], `${context}\n只输出 {"facts":[],"researchAnalysis":[],"gaps":[],"boundaries":[]}`, candidateMode ? 1200 : 2400);
+  const plan = await ask(provider, souls['总编辑'], `${context}\n研究结果：${research.content}\n只输出 {"outline":[],"audience":"","tone":"","checks":[]}`, 700);
+  const writer = await ask(provider, souls['内容君'], productionPrompt({ ...input, candidateMode, plan: plan.content, profile: input.learningProfile, caseExamples: input.caseExamples, souls }), candidateMode ? 1300 : 2800);
+  const reviewer = await ask(provider, souls['审查君'], `用户输入：${context}\n研究结果：${research.content}\n总编辑任务：${plan.content}\n写作初稿：${writer.content}\n只输出与写作初稿完全同构的 JSON。`, candidateMode ? 1300 : 2800);
+  return { result: cleanResult(json(reviewer.content, json(writer.content, {})), input.topic, candidateMode, input.contentType, input.sourceRefs), agentRun: SOUL_NAMES.map((name) => ({ name, status: 'completed' })), model: writer.model };
 }
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return send(res, 405, { error: 'METHOD_NOT_ALLOWED' });
