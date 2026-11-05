@@ -4,10 +4,13 @@ function config(requireServiceKey = true) {
   const expected = requireServiceKey ? [...required, 'SUPABASE_SERVICE_ROLE_KEY'] : required;
   const missing = expected.filter((name) => !process.env[name]);
   if (missing.length) throw new Error(`Missing environment variables: ${missing.join(', ')}`);
+  // Secrets pasted in hosting consoles occasionally retain whitespace.
+  // Normalize them server-side so a harmless trailing newline cannot turn
+  // into an opaque network or header error.
   return {
-    url: process.env.SUPABASE_URL.replace(/\/$/, ''),
-    anonKey: process.env.SUPABASE_ANON_KEY,
-    serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    url: String(process.env.SUPABASE_URL).trim().replace(/\/$/, ''),
+    anonKey: String(process.env.SUPABASE_ANON_KEY).trim(),
+    serviceKey: String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim(),
   };
 }
 
