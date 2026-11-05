@@ -407,10 +407,11 @@ module.exports = async (req, res) => {
     // deterministic event clusters immediately. The next completed model job
     // will transparently replace this provisional Top 100.
     const completedEvaluation = getCompletedEvaluation(collected);
+    const fallbackItems = completedEvaluation ? null : clusterItems(collected, 100);
     let analysis = completedEvaluation || {
-      items: clusterItems(collected, 100),
+      items: fallbackItems,
       status: 'RULE_FALLBACK',
-      stats: { evaluated: 0, events: clusterItems(collected, 100).length, rejected: 0 },
+      stats: { evaluated: 0, events: fallbackItems.length, rejected: 0 },
     };
     if (req.query?.analysis === '1' || new URL(req.url || '/', 'http://localhost').searchParams.get('analysis') === '1') {
       analysis = await evaluateSnapshot(collected);
