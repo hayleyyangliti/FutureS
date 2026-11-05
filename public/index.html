@@ -262,6 +262,23 @@ refreshBtn.addEventListener('click',async()=>{
   // ranking existed. Ranking now always runs in the resumable background job.
   const backgroundRefreshBtn=refreshBtn.cloneNode(true);
   refreshBtn.replaceWith(backgroundRefreshBtn);
+  let hotspotRefreshPoll=null;
+  function watchBackgroundRanking(headers){
+    if(hotspotRefreshPoll)return;
+    let attempts=0;
+    hotspotRefreshPoll=setInterval(async()=>{
+      attempts++;
+      try{
+        const response=await fetch('/api/market-hotspots',{headers}),payload=await response.json();
+        if(response.ok&&payload.pipeline?.mode==='BACKGROUND_RANKING'&&!payload.pipeline?.policyRefreshPending&&Array.isArray(payload.items)&&payload.items.length){
+          currentHotspotSnapshot=payload.refreshedAt||currentHotspotSnapshot;renderSourceMonitoring(payload);renderHotspotItems(payload.items);
+          const updated=new Date(payload.refreshedAt||'');lastRefresh.textContent=Number.isNaN(updated.getTime())?'暂无已保存数据':'数据更新于 '+updated.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
+          clearInterval(hotspotRefreshPoll);hotspotRefreshPoll=null;toast('热点榜单已自动更新');
+        }
+      }catch(_){/* Keep the currently visible ranking while the job retries. */}
+      if(attempts>=48&&hotspotRefreshPoll){clearInterval(hotspotRefreshPoll);hotspotRefreshPoll=null;}
+    },5000);
+  }
   backgroundRefreshBtn.addEventListener('click',async()=>{
     if(backgroundRefreshBtn.disabled)return;
     const token=localStorage.getItem('futures-content-engine:access-token');if(!token){openLogin();return;}
@@ -274,11 +291,12 @@ refreshBtn.addEventListener('click',async()=>{
       if(Array.isArray(payload.items)&&payload.items.length){renderSourceMonitoring(payload);renderHotspotItems(payload.items);}
       const needsBackground=payload.pipeline?.mode!=='BACKGROUND_RANKING'||payload.pipeline?.policyRefreshPending||payload.ai?.status==='PENDING'||!payload.items?.length;
       if(needsBackground){
-        setBusy(backgroundRefreshBtn,true,'后台重算中…');
-        const rebuilt=await fetch('/api/internal/hotspot-refresh',{method:'POST',headers});
-        if(!rebuilt.ok&&rebuilt.status!==202)throw new Error('RANKING_REFRESH_FAILED');
-        await new Promise(resolve=>setTimeout(resolve,rebuilt.status===202?1500:250));
-        response=await fetch('/api/market-hotspots',{headers});payload=await response.json();if(!response.ok)throw new Error(payload.error||'UNAVAILABLE');
+        // Never block the reader on a full model run. Keep the current ranking
+        // visible, trigger a resumable refresh, and replace it automatically.
+        void fetch('/api/internal/hotspot-refresh',{method:'POST',headers}).catch(()=>{});
+        watchBackgroundRanking(headers);
+        if(feedCards.length){toast('已展示当前热点，后台更新完成后将自动同步');return;}
+        emptyState.style.display='block';emptyState.querySelector('b').textContent='正在生成首版热点';emptyState.querySelector('p').textContent='首次生成需要模型完成筛选，结果会自动显示，无需重复刷新。';return;
       }
       currentHotspotSnapshot=payload.refreshedAt||currentHotspotSnapshot;
       renderSourceMonitoring(payload);
