@@ -184,9 +184,12 @@ async function evaluateResumable(items,checkpoint=[],options={}){
   }
   // Previously failing records cannot starve never-attempted records.
   pending.sort((a,b)=>a.attempts-b.attempts);
-  const batches=[];for(let i=0;i<pending.length;i+=5)batches.push(pending.slice(i,i+5));
+  // Ten independent decisions fit comfortably in the validated JSON response.
+  // Larger batches and bounded concurrency cut round trips without changing
+  // the prompt, evidence requirement, or per-item scoring standard.
+  const batches=[];for(let i=0;i<pending.length;i+=10)batches.push(pending.slice(i,i+10));
   const results=[{rows:new Map(restored),failures:[],provider:'',model:''}];let cursor=0;
-  await Promise.all(Array.from({length:Math.min(3,batches.length)},async()=>{
+  await Promise.all(Array.from({length:Math.min(4,batches.length)},async()=>{
     while(cursor<batches.length&&Date.now()<deadline-1000){
       const batch=batches[cursor++],result=await judgeBatch(batch.map(x=>x.item),deadline);results.push(result);
       for(const entry of batch){const row=result.rows.get(entry.item.id);prior.set(entry.key,{key:entry.key,at:Date.now(),attempts:entry.attempts+1,...(row?{row}:{})});}
