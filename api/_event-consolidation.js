@@ -1,4 +1,25 @@
 const {timeScore}=require('./_model-news');
+function eventText(value){return String(value||'').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu,'');}
+function overlap(left,right){const a=new Set(Array.from(left).slice(1).map((char,index)=>Array.from(left)[index]+char)),b=new Set(Array.from(right).slice(1).map((char,index)=>Array.from(right)[index]+char));return [...a].filter(pair=>b.has(pair)).length/Math.max(a.size,b.size,1);}
+function closeInTime(left,right){const a=Date.parse(left?.publishedAt||''),b=Date.parse(right?.publishedAt||'');return !Number.isFinite(a)||!Number.isFinite(b)||Math.abs(a-b)<=24*60*60*1000;}
+// This safety net runs after the model grouping. It only merges exact or
+// near-identical factual headlines in the same daily window, preventing a
+// model from exposing two syndicated copies as separate hotspots.
+function sameEvent(left,right){
+  const a=eventText(left?.title),b=eventText(right?.title);if(!a||!b||!closeInTime(left,right))return false;
+  if(a===b&&a.length>=8)return true;
+  if(Math.min(a.length,b.length)>=18&&(a.includes(b)||b.includes(a)))return true;
+  const evidenceA=eventText(left?.summary).slice(0,180),evidenceB=eventText(right?.summary).slice(0,180);
+  return Math.min(a.length,b.length)>=16&&overlap(a,b)>=.82&&evidenceA&&evidenceB&&(evidenceA.includes(evidenceB)||evidenceB.includes(evidenceA)||overlap(evidenceA,evidenceB)>=.86);
+}
+function coalesceGroups(events,groups){
+  const known=new Map(events.map(item=>[item.id,item])),merged=[];
+  for(const group of groups){
+    const ids=new Set(group.ids);let target=merged.find(candidate=>[...candidate].some(left=>[...ids].some(right=>sameEvent(known.get(left),known.get(right))));
+    if(!target){target=new Set();merged.push(target)}for(const id of ids)target.add(id);
+  }
+  return merged.map(ids=>({ids:[...ids]}));
+}
 function validateGroups(events,body){
   if(!Array.isArray(body?.groups))throw Error('INVALID_GROUPS');
   const known=new Set(events.map(item=>item.id)),seen=new Set();
@@ -35,10 +56,10 @@ async function consolidateEvents(events){
       });if(!response.ok)throw Error('MERGE_REQUEST_FAILED');
       const body=await response.json(),raw=body?.choices?.[0]?.message?.content;if(typeof raw!=='string')throw Error('MERGE_FORMAT');
       const groups=validateGroups(events,JSON.parse(raw.replace(/<think>[\s\S]*?<\/think>/g,'').replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'').trim()));
-      return mergeGroups(events,groups);
+      return mergeGroups(events,coalesceGroups(events,groups));
     }catch(error){console.warn('Event consolidation failed',{provider,type:error.name});}finally{clearTimeout(timer);}
   }
   throw Error('EVENT_CONSOLIDATION_FAILED');
 }
-module.exports={consolidateEvents,validateGroups,mergeGroups};
+module.exports={consolidateEvents,validateGroups,mergeGroups,sameEvent,coalesceGroups};
 
