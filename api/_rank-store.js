@@ -1,5 +1,5 @@
 const {supabase}=require('./_supabase');
-const {POLICY,displayWindow,publishable}=require('./_news-policy');
+const {POLICY,articleLink,isRoundup}=require('./_news-policy');
 const {deterministicGroups,mergeGroups}=require('./_event-consolidation');
 async function readRanking(){
   try {const rows=await supabase('/rest/v1/omnidata_hotspot_rankings?id=eq.current&select=payload,source_refreshed_at,generated_at&limit=1');return rows?.[0]||null;}
@@ -17,19 +17,21 @@ function rankingIdentity(item){
   return String(item?.eventKey||item?.sourceUrl||`${item?.title||''}\u0000${item?.publishedAt||''}`);
 }
 function rankingItems(payload){
-  // `items` contains the summarized final list while `_pool` keeps the
-  // already-scored event candidates. Reading a ranking used to apply a new
-  // "now" window to `items` only. That discarded valid overnight/news-session
-  // records after the ranking had been published and could turn Top 100 into a
-  // single-digit list. Reuse the original collection window and refill from
-  // the scored pool; all source/link/time eligibility checks still run in
-  // publishable().
+  // A stored ranking is already admitted and scored for its collection window.
+  // Do not apply a second moving "now" window when the reader opens the page:
+  // it can erase an otherwise valid Top 100 a few minutes after publication.
+  // At read time retain only the non-time-based safety checks (a source link
+  // and the exclusion of media roundups), then run the deterministic merge.
   const candidates=[...(Array.isArray(payload?.items)?payload.items:[]),...(Array.isArray(payload?._pool)?payload._pool:[])];
   const seen=new Set(),unique=[];
   for(const item of candidates){const key=rankingIdentity(item);if(!key||seen.has(key))continue;seen.add(key);unique.push(item);}
-  // Deduplicate again at read time. This protects the UI immediately when a
-  // previously published cache predates an improved event-merge rule.
-  const eligible=publishable(unique,payload?.collectionWindow||displayWindow(null));
+  const eligible=unique.map(item=>{
+    if(!item||isRoundup(item.originalTitle||item.title))return null;
+    const sources=(Array.isArray(item.sources)?item.sources:[]).map(source=>({...source,url:articleLink(source?.url)})).filter(source=>source.url).slice(0,3);
+    const sourceUrl=articleLink(item.sourceUrl)||sources[0]?.url||'';
+    if(!sourceUrl)return null;
+    return {...item,sourceUrl,sources:sources.length?sources:[{name:item.source||'已核验信源',url:sourceUrl,publishedAt:item.publishedAt,grade:item.grade,title:item.title,excerpt:item.summary||''}]};
+  }).filter(Boolean);
   const indexed=eligible.map((item,index)=>({...item,id:item.id||`published-${index}`}));
   // A malformed legacy cache entry must never make the entire hotspot and
   // source-monitoring API unavailable. It can safely be displayed unmerged
