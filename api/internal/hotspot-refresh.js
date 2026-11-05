@@ -41,7 +41,9 @@ module.exports=async(req,res)=>{
     // Save validated decisions before consolidation, including model rejections.
     // A merge failure or a new raw snapshot must not cause all 500 to restart.
     await saveProgress(key,token,progress);
-    if(items.length&&!analysis.stats.evaluated)throw Error('NO_VALID_MODEL_RESULTS');
+    // When both model providers are transiently unavailable, retain the
+    // conservative rule-qualified events instead of publishing an empty page.
+    if(items.length&&!analysis.stats.evaluated&&!analysis._events?.length)throw Error('NO_VALID_MODEL_RESULTS');
     // Carry only previously model-approved recent events, never rejected flashes.
     const pool=combinePool(analysis._events,previous?.payload?.policyVersion===POLICY?previous?.payload?._pool:[],window);
     const merged=await consolidateEvents(pool),summaries=await summarizeEvents(selectCoverage(merged),previous?.payload?.items);
