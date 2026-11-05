@@ -448,6 +448,7 @@ module.exports = async (req, res) => {
     if (error.code === 'PGRST205' || error.code === '42P01') return send(res, 503, { error: 'OMNIDATA_CACHE_TABLE_MISSING' });
     if (error.status === 401 || error.status === 403 || error.code === '42501') return send(res, 502, { error: 'OMNIDATA_CACHE_ACCESS_DENIED' });
     if (error.message?.startsWith('Missing environment variables:')) return send(res, 503, { error: 'OMNIDATA_SUPABASE_NOT_CONFIGURED' });
+    if (error.code === 'UPSTREAM_TIMEOUT') return send(res, 504, { error: 'SUPABASE_UPSTREAM_TIMEOUT' });
     return send(res, 502, { error: 'OMNIDATA_CACHE_UNAVAILABLE' });
   }
 };
