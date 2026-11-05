@@ -459,5 +459,5 @@ module.exports = async (req, res) => {
 };
 
 // Pure helpers are exposed for regression tests; this does not create an API route.
-module.exports._test = { VERIFIED_LABELS, prepareModelItem, normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, qualifiesShortCandidate, sameEvidence, clusterItems, score, newsScope, selectCoverage, diagnoseFeed, isArticleIdentity, immediatePreview, diagnoseFeed, isArticleIdentity, scoreCandidatePool };
+module.exports._test = { VERIFIED_LABELS, prepareModelItem, normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, qualifiesShortCandidate, sameEvidence, clusterItems, score, newsScope, selectCoverage, immediatePreview, diagnoseFeed, isArticleIdentity, scoreCandidatePool };
 
