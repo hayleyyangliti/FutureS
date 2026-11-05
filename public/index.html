@@ -257,6 +257,41 @@ refreshBtn.addEventListener('click',async()=>{
       if(!feedCards.length){emptyState.style.display='block';emptyState.querySelector('b').textContent='模型筛选未完成';emptyState.querySelector('p').textContent=message;}
     }finally{setBusy(refreshBtn,false);}
   });
+  // Replace the legacy synchronous model refresh. The old path could exceed a
+  // serverless request window and clear the page even while a valid cached
+  // ranking existed. Ranking now always runs in the resumable background job.
+  const backgroundRefreshBtn=refreshBtn.cloneNode(true);
+  refreshBtn.replaceWith(backgroundRefreshBtn);
+  backgroundRefreshBtn.addEventListener('click',async()=>{
+    if(backgroundRefreshBtn.disabled)return;
+    const token=localStorage.getItem('futures-content-engine:access-token');if(!token){openLogin();return;}
+    setBusy(backgroundRefreshBtn,true,'读取资讯…');
+    try{
+      const headers={Authorization:`Bearer ${token}`};
+      let response=await fetch('/api/market-hotspots',{headers});
+      let payload=await response.json();if(!response.ok)throw new Error(payload.error||'UNAVAILABLE');
+      currentHotspotSnapshot=payload.refreshedAt||'';
+      if(Array.isArray(payload.items)&&payload.items.length){renderSourceMonitoring(payload);renderHotspotItems(payload.items);}
+      const needsBackground=payload.pipeline?.mode!=='BACKGROUND_RANKING'||payload.pipeline?.policyRefreshPending||payload.ai?.status==='PENDING'||!payload.items?.length;
+      if(needsBackground){
+        setBusy(backgroundRefreshBtn,true,'后台重算中…');
+        const rebuilt=await fetch('/api/internal/hotspot-refresh',{method:'POST',headers});
+        if(!rebuilt.ok&&rebuilt.status!==202)throw new Error('RANKING_REFRESH_FAILED');
+        await new Promise(resolve=>setTimeout(resolve,rebuilt.status===202?1500:250));
+        response=await fetch('/api/market-hotspots',{headers});payload=await response.json();if(!response.ok)throw new Error(payload.error||'UNAVAILABLE');
+      }
+      currentHotspotSnapshot=payload.refreshedAt||currentHotspotSnapshot;
+      renderSourceMonitoring(payload);
+      if(Array.isArray(payload.items)&&payload.items.length)renderHotspotItems(payload.items);
+      const updated=new Date(payload.refreshedAt||'');lastRefresh.textContent=Number.isNaN(updated.getTime())?'暂无已保存数据':'数据更新于 '+updated.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
+      if(feedCards.length){toast(payload.ai?.status==='MODEL_UNAVAILABLE'?'模型暂不可用，已展示通过规则校验的热点资讯':'已读取最新热点排名');}
+      else{emptyState.style.display='block';emptyState.querySelector('b').textContent='热点正在后台计算';emptyState.querySelector('p').textContent='资讯已进入后台筛选，请稍后刷新查看结果。';}
+    }catch(error){
+      const message=feedCards.length?'热点后台计算暂未完成，已保留上一版可用结果，请稍后重试':'热点正在后台计算，请稍后刷新查看结果。';
+      toast(message);
+      if(!feedCards.length){emptyState.style.display='block';emptyState.querySelector('b').textContent='热点正在后台计算';emptyState.querySelector('p').textContent=message;}
+    }finally{setBusy(backgroundRefreshBtn,false);}
+  });
   document.querySelectorAll('.page-link').forEach(link=>link.addEventListener('click',()=>{document.querySelectorAll('.page-link').forEach(x=>x.classList.remove('active'));link.classList.add('active');document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));document.getElementById(link.dataset.target).classList.add('active')}));
   const supplementalHotspots=[
     ['绿色金融及新能源',66,'新能源产业政策释放新信号，相关原材料需求预期受到关注',['碳酸锂','工业硅'],'A类信源','8小时10分',[28,14,16,8]],
