@@ -1,5 +1,6 @@
 const {supabase}=require('./_supabase');
 const {POLICY,displayWindow,publishable}=require('./_news-policy');
+const {deterministicGroups,mergeGroups}=require('./_event-consolidation');
 async function readRanking(){
   try {const rows=await supabase('/rest/v1/omnidata_hotspot_rankings?id=eq.current&select=payload,source_refreshed_at,generated_at&limit=1');return rows?.[0]||null;}
   catch(error){if(['PGRST205','42P01'].includes(error.code))return null;throw error;}
@@ -26,7 +27,11 @@ function rankingItems(payload){
   const candidates=[...(Array.isArray(payload?.items)?payload.items:[]),...(Array.isArray(payload?._pool)?payload._pool:[])];
   const seen=new Set(),unique=[];
   for(const item of candidates){const key=rankingIdentity(item);if(!key||seen.has(key))continue;seen.add(key);unique.push(item);}
-  return publishable(unique,payload?.collectionWindow||displayWindow(null));
+  // Deduplicate again at read time. This protects the UI immediately when a
+  // previously published cache predates an improved event-merge rule.
+  const eligible=publishable(unique,payload?.collectionWindow||displayWindow(null));
+  const indexed=eligible.map((item,index)=>({...item,id:item.id||`published-${index}`}));
+  return mergeGroups(indexed,deterministicGroups(indexed));
 }
 function rankingResponse(row){
   const {_pool,...payload}=row.payload||{},items=rankingItems(row.payload||{}).map(({scoringReasons,scoringEvidence,reports,summaryEvidence,summaryInputKey,...item})=>item);
