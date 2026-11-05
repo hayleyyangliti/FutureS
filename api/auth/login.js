@@ -1,4 +1,4 @@
-const { config, send } = require('../_supabase');
+const { config, send, upstreamFetch } = require('../_supabase');
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return send(res, 405, { error: 'METHOD_NOT_ALLOWED' });
@@ -8,7 +8,7 @@ module.exports = async (req, res) => {
     if (!/^[^\s@]+@gtht\.com$/.test(email) || !password) return send(res, 400, { error: 'INVALID_CREDENTIALS' });
 
     const { url, anonKey } = config(false);
-    const tokenResponse = await fetch(`${url}/auth/v1/token?grant_type=password`, {
+    const tokenResponse = await upstreamFetch(`${url}/auth/v1/token?grant_type=password`, {
       method: 'POST',
       // 密码授权属于 Supabase Auth 的普通登录流程，使用 Publishable key。
       // Secret key 仅用于服务端访问资料表，不参与用户密码校验。
@@ -33,7 +33,7 @@ module.exports = async (req, res) => {
     }
 
     if (!tokenData.user?.id) return send(res, 401, { error: 'INVALID_CREDENTIALS' });
-    const profileResponse = await fetch(`${url}/rest/v1/rpc/current_profile`, {
+    const profileResponse = await upstreamFetch(`${url}/rest/v1/rpc/current_profile`, {
       method: 'POST',
       headers: {
         apikey: anonKey,
