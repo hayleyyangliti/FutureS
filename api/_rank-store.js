@@ -31,7 +31,11 @@ function rankingItems(payload){
   // previously published cache predates an improved event-merge rule.
   const eligible=publishable(unique,payload?.collectionWindow||displayWindow(null));
   const indexed=eligible.map((item,index)=>({...item,id:item.id||`published-${index}`}));
-  return mergeGroups(indexed,deterministicGroups(indexed));
+  // A malformed legacy cache entry must never make the entire hotspot and
+  // source-monitoring API unavailable. It can safely be displayed unmerged
+  // while the background job writes a normalized replacement.
+  try{return mergeGroups(indexed,deterministicGroups(indexed));}
+  catch(error){console.warn('Cached ranking dedup skipped',error.name);return eligible;}
 }
 function rankingResponse(row){
   const {_pool,...payload}=row.payload||{},items=rankingItems(row.payload||{}).map(({scoringReasons,scoringEvidence,reports,summaryEvidence,summaryInputKey,...item})=>item);
