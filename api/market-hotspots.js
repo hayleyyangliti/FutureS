@@ -402,7 +402,16 @@ module.exports = async (req, res) => {
     // Every nonempty approved-source record is submitted to the model.
     const window=displayWindow(null);
     const collected = admitted.map(prepareModelItem).filter(Boolean).map(item=>eligibleItem(item,window)).filter(Boolean);
-    let analysis = getCompletedEvaluation(collected)||{items:[],status:process.env.MINIMAX_API_KEY||process.env.DEEPSEEK_API_KEY?'PENDING':'MODEL_UNAVAILABLE'};
+    // A browser read must never wait for the asynchronous model-ranking job.
+    // When the completed ranking is not yet available, publish the same
+    // deterministic event clusters immediately. The next completed model job
+    // will transparently replace this provisional Top 100.
+    const completedEvaluation = getCompletedEvaluation(collected);
+    let analysis = completedEvaluation || {
+      items: clusterItems(collected, 100),
+      status: 'RULE_FALLBACK',
+      stats: { evaluated: 0, events: clusterItems(collected, 100).length, rejected: 0 },
+    };
     if (req.query?.analysis === '1' || new URL(req.url || '/', 'http://localhost').searchParams.get('analysis') === '1') {
       analysis = await evaluateSnapshot(collected);
     }
