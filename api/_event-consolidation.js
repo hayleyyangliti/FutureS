@@ -2,6 +2,9 @@ const {timeScore}=require('./_model-news');
 function eventText(value){return String(value||'').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu,'');}
 function overlap(left,right){const a=new Set(Array.from(left).slice(1).map((char,index)=>Array.from(left)[index]+char)),b=new Set(Array.from(right).slice(1).map((char,index)=>Array.from(right)[index]+char));return [...a].filter(pair=>b.has(pair)).length/Math.max(a.size,b.size,1);}
 function closeInTime(left,right){const a=Date.parse(left?.publishedAt||''),b=Date.parse(right?.publishedAt||'');return !Number.isFinite(a)||!Number.isFinite(b)||Math.abs(a-b)<=24*60*60*1000;}
+const EVENT_SIGNALS=[['霍尔木兹',/霍尔木兹/],['苏伊士',/苏伊士/],['红海',/红海/],['油轮',/油轮/],['无人机',/无人机/],['起火',/起火|着火|失火/],['捕获',/捕获|缴获|拦截/],['通关',/通关|口岸/],['蒙煤',/蒙煤|蒙古煤/],['减产',/减产/],['停产',/停产|停工/],['库存',/库存/],['关税',/关税/],['制裁',/制裁/],['停运',/停运|中断航运|航道受阻/]];
+function eventSignals(item){const text=eventText(`${item?.title||''} ${item?.summary||''}`).slice(0,520);return new Set(EVENT_SIGNALS.filter(([,rule])=>rule.test(text)).map(([name])=>name));}
+function sharedSignals(left,right){const a=eventSignals(left),b=eventSignals(right);return [...a].filter(signal=>b.has(signal));}
 // This safety net runs after the model grouping. It only merges exact or
 // near-identical factual headlines in the same daily window, preventing a
 // model from exposing two syndicated copies as separate hotspots.
@@ -9,8 +12,13 @@ function sameEvent(left,right){
   const a=eventText(left?.title),b=eventText(right?.title);if(!a||!b||!closeInTime(left,right))return false;
   if(a===b&&a.length>=8)return true;
   if(Math.min(a.length,b.length)>=18&&(a.includes(b)||b.includes(a)))return true;
+  // Syndicated flash news often rewrites the subject but keeps the concrete
+  // event facts. Three matching rare facts plus overlapping headline wording
+  // is sufficient to merge it, while generic macro terms alone cannot merge.
+  const titleOverlap=overlap(a,b),signals=sharedSignals(left,right);
+  if(signals.length>=3&&titleOverlap>=.26)return true;
   const evidenceA=eventText(left?.summary).slice(0,180),evidenceB=eventText(right?.summary).slice(0,180);
-  return Math.min(a.length,b.length)>=16&&overlap(a,b)>=.82&&evidenceA&&evidenceB&&(evidenceA.includes(evidenceB)||evidenceB.includes(evidenceA)||overlap(evidenceA,evidenceB)>=.86);
+  return Math.min(a.length,b.length)>=16&&titleOverlap>=.82&&evidenceA&&evidenceB&&(evidenceA.includes(evidenceB)||evidenceB.includes(evidenceA)||overlap(evidenceA,evidenceB)>=.86);
 }
 function coalesceGroups(events,groups){
   const known=new Map(events.map(item=>[item.id,item])),merged=[];
@@ -74,5 +82,5 @@ async function consolidateEvents(events){
   console.warn('Event consolidation used deterministic fallback');
   return mergeGroups(events,deterministicGroups(events));
 }
-module.exports={consolidateEvents,validateGroups,mergeGroups,sameEvent,coalesceGroups,deterministicGroups};
+module.exports={consolidateEvents,validateGroups,mergeGroups,sameEvent,coalesceGroups,deterministicGroups,eventSignals,sharedSignals};
 
