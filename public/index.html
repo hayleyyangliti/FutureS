@@ -317,6 +317,23 @@ refreshBtn.addEventListener('click',async()=>{
   // is not available; the last visible list remains intact on any error.
   const instantRefreshBtn=backgroundRefreshBtn.cloneNode(true);
   backgroundRefreshBtn.replaceWith(instantRefreshBtn);
+  const hotspotCacheKey='futures-content-engine:last-hotspot-payload';
+  function saveHotspotCache(payload){
+    if(Array.isArray(payload?.items)&&payload.items.length){
+      try{localStorage.setItem(hotspotCacheKey,JSON.stringify({savedAt:Date.now(),payload}));}catch(_){}
+    }
+  }
+  function restoreHotspotCache(){
+    try{
+      const cached=JSON.parse(localStorage.getItem(hotspotCacheKey)||'null');
+      if(!Array.isArray(cached?.payload?.items)||!cached.payload.items.length)return false;
+      renderSourceMonitoring(cached.payload);
+      currentHotspotSnapshot=cached.payload.refreshedAt||'';
+      renderHotspotItems(cached.payload.items);
+      lastRefresh.textContent='当前显示最近一次成功读取的热点资讯';
+      return true;
+    }catch(_){return false;}
+  }
   instantRefreshBtn.addEventListener('click',async()=>{
     if(instantRefreshBtn.disabled)return;
     const token=localStorage.getItem('futures-content-engine:access-token');if(!token){openLogin();return;}
@@ -326,12 +343,13 @@ refreshBtn.addEventListener('click',async()=>{
       const payload=await response.json();if(!response.ok)throw new Error(payload.error||'UNAVAILABLE');
       renderSourceMonitoring(payload);
       if(!Array.isArray(payload.items)||!payload.items.length)throw new Error('EMPTY_HOTSPOTS');
-      currentHotspotSnapshot=payload.refreshedAt||'';renderHotspotItems(payload.items);
+      currentHotspotSnapshot=payload.refreshedAt||'';renderHotspotItems(payload.items);saveHotspotCache(payload);
       const updated=new Date(payload.refreshedAt||'');lastRefresh.textContent=Number.isNaN(updated.getTime())?'已读取服务器资讯':'数据更新于 '+updated.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
       toast(payload.ai?.status==='PENDING'?'已展示当前去重热点，模型评分将在后续任务中更新':'热点列表已更新');
     }catch(error){
-      // Do not replace a visible list with an empty "calculating" state.
-      toast(error.message==='UNAUTHORIZED'?'登录已失效，请重新登录':'服务器资讯暂时不可用，已保留当前热点列表');
+      if(error.message==='UNAUTHORIZED'){toast('登录已失效，请重新登录');}
+      else if(restoreHotspotCache()){toast(error.message==='SUPABASE_UPSTREAM_TIMEOUT'?'资讯服务连接超时，已显示最近成功读取的热点':'服务器资讯暂不可达，已显示最近成功读取的热点');}
+      else{toast(error.message==='SUPABASE_UPSTREAM_TIMEOUT'?'资讯服务连接超时，请稍后重试':'服务器资讯暂时不可用，已保留当前热点列表');}
     }finally{setBusy(instantRefreshBtn,false);}
   });
   document.querySelectorAll('.page-link').forEach(link=>link.addEventListener('click',()=>{document.querySelectorAll('.page-link').forEach(x=>x.classList.remove('active'));link.classList.add('active');document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));document.getElementById(link.dataset.target).classList.add('active')}));
