@@ -69,9 +69,11 @@ async function summarizeEvents(items,previous=[],options={}){
   const deadline=Date.now()+(options.budgetMs??45000),cached=new Map(previous.filter(x=>x.summaryMethod==='MODEL_SUMMARY'&&x.summaryInputKey&&typeof x.summary==='string'&&Array.from(x.summary).length<=200&&typeof x.title==='string'&&Array.from(x.title).length<=20).map(x=>[x.summaryInputKey,x]));
   const results=new Map(),pending=[];
   for(const item of items){const key=summaryKey(item),old=cached.get(key);if(old)results.set(item.id,{title:old.title,summary:old.summary,summaryEvidence:old.summaryEvidence,summaryMethod:'MODEL_SUMMARY',summaryInputKey:key});else pending.push(item);}
-  const batches=[];for(let i=0;i<pending.length;i+=5)batches.push(pending.slice(i,i+5));
+  // Summaries remain independently validated; batching reduces provider round
+  // trips while retaining the same title, evidence and factuality checks.
+  const batches=[];for(let i=0;i<pending.length;i+=10)batches.push(pending.slice(i,i+10));
   let cursor=0;
-  await Promise.all(Array.from({length:Math.min(4,batches.length)},async()=>{while(cursor<batches.length){
+  await Promise.all(Array.from({length:Math.min(6,batches.length)},async()=>{while(cursor<batches.length){
     let remaining=batches[cursor++];
     for(const provider of ['MiniMax','DeepSeek']){
       if(!remaining.length||Date.now()>=deadline-1000)break;
