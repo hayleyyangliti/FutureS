@@ -316,17 +316,6 @@ function newsScope(value) {
   return 'other';
 }
 function selectCoverage(ranked, limit = 100) { return selectBalanced(ranked,limit); }
-function immediatePreview(items, window) {
-  // This is not a scoring substitute. It is a read-only, strictly eligible
-  // preview used only until the resumable model job publishes its final rank.
-  // It keeps the page useful during a cold start without admitting unlinked,
-  // stale, roundup or market-tape records.
-  const eligible=(items||[]).map(item=>eligibleItem(item,window)).filter(Boolean);
-  return clusterItems(eligible,100).map(item=>({
-    ...item, summaryMethod:'PENDING', summaryType:'SOURCE_EXCERPT',
-    scoringMethod:'PREVIEW', scoringProvider:'PENDING_MODEL', scoringModel:'',
-  }));
-}
 function diagnoseFeed(entries) {
   const bySource = {};
   for (const entry of entries) {
@@ -423,23 +412,22 @@ module.exports = async (req, res) => {
     const sameShanghaiDate = Number.isFinite(refreshedMs) &&
       new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(refreshedMs) ===
       new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now());
-    const preview=immediatePreview(collected,window),displayItems=analysis.items?.length?analysis.items:preview;
     return send(res, 200, {
-      items: displayItems, refreshedAt: feed.refreshedAt,
+      items: analysis.items, refreshedAt: feed.refreshedAt,
       stale, tradingDate: Boolean(feed.tradingDate && sameShanghaiDate),
       source: `服务器缓存：${Object.keys(VERIFIED_LABELS).length} 个准入信源，${statuses.filter((status) => status.ok).length} 个采集正常`,
       pipeline: {
         mode:'MODEL_ONLY',collected:collected.length,rejected:analysis.stats?.rejected||0,rejectedShort:0,
         invalidEmpty:admitted.length-collected.length,below130:collected.filter(item=>item.articleChars<130).length,
-        shortAdmitted:displayItems.filter(item=>item.shortNotice).length,
+        shortAdmitted:analysis.items.filter(item=>item.shortNotice).length,
         raw: feed.items.length, admitted: admitted.length,
-        minArticleChars:null,clustered:analysis.stats?.events||preview.length,displayed:displayItems.length,
+        minArticleChars:null,clustered:analysis.stats?.events||0,displayed:analysis.items.length,
         modelCandidateLimit:null,modelScoredCandidates:analysis.stats?.evaluated||0,
         modelStats:analysis.stats||null,
         sourceBreakdown:Object.keys(VERIFIED_LABELS).map(source=>({source,raw:admitted.filter(entry=>entry.source===source).length,submitted:collected.filter(item=>item.spider===source).length})),
         coverageWarning:analysis.status==='PENDING'?null:analysis.items.length<20?'INSUFFICIENT_MODEL_APPROVED_NEWS':null,
-        domesticDisplayed: displayItems.filter((item) => item.scope === 'domestic').length,
-        internationalDisplayed: displayItems.filter((item) => item.scope === 'international').length,
+        domesticDisplayed: analysis.items.filter((item) => item.scope === 'domestic').length,
+        internationalDisplayed: analysis.items.filter((item) => item.scope === 'international').length,
         minSources: 1, maxSources: 3,
         sourcesRequested: Object.keys(VERIFIED_LABELS).length,
         sourcesSucceeded: statuses.filter((status) => status.ok).length,
@@ -459,5 +447,5 @@ module.exports = async (req, res) => {
 };
 
 // Pure helpers are exposed for regression tests; this does not create an API route.
-module.exports._test = { VERIFIED_LABELS, prepareModelItem, normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, qualifiesShortCandidate, sameEvidence, clusterItems, score, newsScope, selectCoverage, immediatePreview, diagnoseFeed, isArticleIdentity, scoreCandidatePool };
+module.exports._test = { VERIFIED_LABELS, prepareModelItem, normalizeItem, titleKey, sameHotspot, sameSpeakerLead, isMarketTape, articleUrl, articleCharacterCount, qualifiesArticleLength, qualifiesShortCandidate, sameEvidence, clusterItems, score, newsScope, selectCoverage, diagnoseFeed, isArticleIdentity, scoreCandidatePool };
 
