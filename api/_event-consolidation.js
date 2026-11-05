@@ -20,6 +20,18 @@ function coalesceGroups(events,groups){
   }
   return merged.map(ids=>({ids:[...ids]}));
 }
+// The model improves semantic grouping, but an unavailable provider must not
+// block publication of an otherwise valid ranking. This conservative fallback
+// merges only the same high-confidence syndicated copies handled by sameEvent.
+function deterministicGroups(events){
+  const groups=[];
+  for(const item of events){
+    let group=groups.find(candidate=>candidate.some(existing=>sameEvent(existing,item)));
+    if(!group){group=[];groups.push(group);}
+    group.push(item);
+  }
+  return groups.map(group=>({ids:group.map(item=>item.id)}));
+}
 function validateGroups(events,body){
   if(!Array.isArray(body?.groups))throw Error('INVALID_GROUPS');
   const known=new Set(events.map(item=>item.id)),seen=new Set();
@@ -59,7 +71,8 @@ async function consolidateEvents(events){
       return mergeGroups(events,coalesceGroups(events,groups));
     }catch(error){console.warn('Event consolidation failed',{provider,type:error.name});}finally{clearTimeout(timer);}
   }
-  throw Error('EVENT_CONSOLIDATION_FAILED');
+  console.warn('Event consolidation used deterministic fallback');
+  return mergeGroups(events,deterministicGroups(events));
 }
-module.exports={consolidateEvents,validateGroups,mergeGroups,sameEvent,coalesceGroups};
+module.exports={consolidateEvents,validateGroups,mergeGroups,sameEvent,coalesceGroups,deterministicGroups};
 
