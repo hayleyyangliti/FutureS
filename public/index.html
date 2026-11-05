@@ -311,6 +311,28 @@ refreshBtn.addEventListener('click',async()=>{
       if(!feedCards.length){emptyState.style.display='block';emptyState.querySelector('b').textContent='热点正在后台计算';emptyState.querySelector('p').textContent=message;}
     }finally{setBusy(backgroundRefreshBtn,false);}
   });
+  // Instant refresh restores the original reader experience: fetching a list
+  // must never start or wait for a long-running model job. The API returns a
+  // strictly eligible, de-duplicated preview immediately when a final ranking
+  // is not available; the last visible list remains intact on any error.
+  const instantRefreshBtn=backgroundRefreshBtn.cloneNode(true);
+  backgroundRefreshBtn.replaceWith(instantRefreshBtn);
+  instantRefreshBtn.addEventListener('click',async()=>{
+    if(instantRefreshBtn.disabled)return;
+    const token=localStorage.getItem('futures-content-engine:access-token');if(!token){openLogin();return;}
+    setBusy(instantRefreshBtn,true,'读取资讯…');
+    try{
+      const response=await fetch('/api/market-hotspots',{headers:{Authorization:`Bearer ${token}`}});
+      const payload=await response.json();if(!response.ok)throw new Error(payload.error||'UNAVAILABLE');
+      if(!Array.isArray(payload.items)||!payload.items.length)throw new Error('EMPTY_HOTSPOTS');
+      currentHotspotSnapshot=payload.refreshedAt||'';renderSourceMonitoring(payload);renderHotspotItems(payload.items);
+      const updated=new Date(payload.refreshedAt||'');lastRefresh.textContent=Number.isNaN(updated.getTime())?'已读取服务器资讯':'数据更新于 '+updated.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
+      toast(payload.ai?.status==='PENDING'?'已展示当前去重热点，模型评分将在后续任务中更新':'热点列表已更新');
+    }catch(error){
+      // Do not replace a visible list with an empty "calculating" state.
+      toast(error.message==='UNAUTHORIZED'?'登录已失效，请重新登录':'服务器资讯暂时不可用，已保留当前热点列表');
+    }finally{setBusy(instantRefreshBtn,false);}
+  });
   document.querySelectorAll('.page-link').forEach(link=>link.addEventListener('click',()=>{document.querySelectorAll('.page-link').forEach(x=>x.classList.remove('active'));link.classList.add('active');document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));document.getElementById(link.dataset.target).classList.add('active')}));
   const supplementalHotspots=[
     ['绿色金融及新能源',66,'新能源产业政策释放新信号，相关原材料需求预期受到关注',['碳酸锂','工业硅'],'A类信源','8小时10分',[28,14,16,8]],
