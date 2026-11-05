@@ -23,7 +23,12 @@ function sameEvent(left,right){
 function coalesceGroups(events,groups){
   const known=new Map(events.map(item=>[item.id,item])),merged=[];
   for(const group of groups){
-    const ids=new Set(group.ids);let target=merged.find(candidate=>[...candidate].some(left=>[...ids].some(right=>sameEvent(known.get(left),known.get(right))));
+    const ids = new Set(group.ids);
+    const target = merged.find((candidate) =>
+      [...candidate].some((left) =>
+        [...ids].some((right) => sameEvent(known.get(left), known.get(right)))
+      )
+    );
     if(!target){target=new Set();merged.push(target)}for(const id of ids)target.add(id);
   }
   return merged.map(ids=>({ids:[...ids]}));
