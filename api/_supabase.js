@@ -15,6 +15,30 @@ function send(res, status, payload) {
   res.status(status).json(payload);
 }
 
+function timeoutError() {
+  const error = new Error('SUPABASE_UPSTREAM_TIMEOUT');
+  error.code = 'UPSTREAM_TIMEOUT';
+  error.status = 504;
+  return error;
+}
+
+async function upstreamFetch(url, options = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const parentSignal = options.signal;
+  const abort = () => controller.abort();
+  if (parentSignal) parentSignal.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(abort, timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted || error?.name === 'AbortError') throw timeoutError();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    if (parentSignal) parentSignal.removeEventListener('abort', abort);
+  }
+}
+
 async function supabase(path, options = {}, useServiceKey = true) {
   const { url, anonKey, serviceKey } = config(useServiceKey);
   const headers = {
@@ -26,7 +50,7 @@ async function supabase(path, options = {}, useServiceKey = true) {
   if (useServiceKey && /^[^.]+\.[^.]+\.[^.]+$/.test(serviceKey) && !headers.Authorization) {
     headers.Authorization = `Bearer ${serviceKey}`;
   }
-  const response = await fetch(`${url}${path}`, { ...options, headers });
+  const response = await upstreamFetch(`${url}${path}`, { ...options, headers });
   const raw = await response.text();
   let body = raw;
   try { body = raw ? JSON.parse(raw) : null; } catch (_) {}
@@ -49,7 +73,7 @@ async function currentProfile(req) {
   const token = bearer(req);
   if (!token) throw new Error('UNAUTHORIZED');
   const { url, anonKey } = config(false);
-  const response = await fetch(`${url}/rest/v1/rpc/current_profile`, {
+  const response = await upstreamFetch(`${url}/rest/v1/rpc/current_profile`, {
     method: 'POST',
     headers: {
       apikey: anonKey,
@@ -76,5 +100,5 @@ async function currentProfile(req) {
   return { user: { id: profile.auth_user_id }, profile };
 }
 
-module.exports = { config, send, supabase, currentProfile };
+module.exports = { config, send, supabase, currentProfile, upstreamFetch };
 
