@@ -324,8 +324,9 @@ refreshBtn.addEventListener('click',async()=>{
     try{
       const response=await fetch('/api/market-hotspots',{headers:{Authorization:`Bearer ${token}`}});
       const payload=await response.json();if(!response.ok)throw new Error(payload.error||'UNAVAILABLE');
+      renderSourceMonitoring(payload);
       if(!Array.isArray(payload.items)||!payload.items.length)throw new Error('EMPTY_HOTSPOTS');
-      currentHotspotSnapshot=payload.refreshedAt||'';renderSourceMonitoring(payload);renderHotspotItems(payload.items);
+      currentHotspotSnapshot=payload.refreshedAt||'';renderHotspotItems(payload.items);
       const updated=new Date(payload.refreshedAt||'');lastRefresh.textContent=Number.isNaN(updated.getTime())?'已读取服务器资讯':'数据更新于 '+updated.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
       toast(payload.ai?.status==='PENDING'?'已展示当前去重热点，模型评分将在后续任务中更新':'热点列表已更新');
     }catch(error){
