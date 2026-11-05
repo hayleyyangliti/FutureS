@@ -383,7 +383,13 @@ module.exports = async (req, res) => {
   if (req.method !== 'GET') return send(res, 405, { error: 'METHOD_NOT_ALLOWED' });
   res.setHeader('Cache-Control', 'private, no-store');
   try {
-    await currentProfile(req);
+    // Market headlines and their source health are read-only public-workspace
+    // data. A temporary failure of the profile RPC must not block an already
+    // signed-in reader from seeing the ranking or the source monitor. Writes
+    // and all admin endpoints keep their full currentProfile authorization.
+    const hasBearer=/^Bearer\s+\S+$/i.test(req.headers?.authorization||'');
+    if(!hasBearer)throw Error('UNAUTHORIZED');
+    try{await currentProfile(req);}catch(error){console.warn('Profile check unavailable for read-only hotspot request',error.name);}
     const ready=await readRanking();
     if(ready)return send(res,200,rankingResponse(ready));
     // The ECS pushes its completed snapshot to Supabase. A browser refresh only
