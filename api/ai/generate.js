@@ -66,9 +66,17 @@ function cleanCaseExamples(value) {
     content: clean(row?.content, 1800),
   })).filter((row) => row.title || row.content).slice(0, 6);
 }
+function privateCopyBody(value) {
+  return String(value || '')
+    .replace(/(?:^|\n)\s*(?:资料来源|信息来源|来源|参考资料)\s*[：:][\s\S]*$/g, '')
+    .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, '$1')
+    .replace(/https?:\/\/[^\s<>]+/g, '')
+    .replace(/据[^，。；\n]{1,70}(?:报道|消息|数据)[，,]?/g, '')
+    .replace(/\n{3,}/g, '\n\n').trim();
+}
 function hasEmoji(value) { return /\p{Extended_Pictographic}/u.test(String(value || '')); }
 function ensurePrivateMarketingEmoji(value) {
-  const body = clean(value, 3000);
+  const body = clean(privateCopyBody(value), 3000);
   if (!body) return body;
   return hasEmoji(body) ? body : `📌 ${body}\n\n✨ 关注后续公开信息与风险变化。`;
 }
@@ -86,7 +94,7 @@ async function ask(provider, system, user, maxTokens = 900) {
 }
 function productionPrompt({ topic, instruction, contentType, subtype, candidateMode, plan, profile, caseExamples, souls }) {
   const format = candidateMode ? '{"candidates":[{"title":"候选标题","body":"候选正文"},{"title":"候选标题","body":"候选正文"},{"title":"候选标题","body":"候选正文"}]}' : '{"title":"内容标题","body":"可直接编辑的完整正文","sources":["用户明确提供的来源名称"]}';
-  const privateRule = contentType === '私域营销文案' ? '私域营销文案必须使用 2—4 个与语义相关的 Emoji（如📌、💥、🔎、👇），首段要有阅读钩子；按“事实—影响/看点—下一步关注”写成 1—3 个短段，口语化但不夸张；不得使用“必涨、稳赚、上车、财富密码”等词，也不得把 Emoji 堆成装饰。' : '';
+  const privateRule = contentType === '私域营销文案' ? '私域文案必须以匹配的历史案例为首要表达标准：先提炼案例的字数范围、分段、句长、开头钩子、Emoji位置与密度、结尾引导，再按这些特征写作；禁止把新闻摘要或研究长文换上Emoji充当营销文案。相同场景案例优先，缺少同场景时学习同类型案例。3条候选使用不同开头和角度，避免同义改写。案例未提供完整正文时采用80—160字、2—4短段、2—4个相关Emoji的简短私域表达，不虚称已学习案例。正文严禁出现媒体名称、据某媒体报道、来源段落、网址、Markdown链接或引用编号；可追溯来源由系统在独立资料来源区域展示。风险提示由系统追加。' : '';
   return `${souls['内容君']}\n\n请为期市内容引擎撰写中文期货市场内容。仅输出 JSON：${format}\n内容类型：${contentType}\n具体场景：${subtype || '未指定'}\n选题：${topic || '未指定'}\n生成指令：${instruction || '围绕选题生成专业、克制、可供人工编辑的内容。'}\n研究规划：${plan}\n用户已确认的表达偏好：${profile || '暂无，按专业、克制、清晰执行。'}\n案例库样本（只学习风格，不可复用其中事实）：${JSON.stringify(caseExamples || [])}\n硬性要求：只能基于输入事实；缺少事实时使用待核验表述，绝不杜撰数据、日期、来源或机构观点；不提供买卖指令或收益承诺；正文为纯文本；资料来源仅填写用户明确提供的名称；${privateRule}${contentType === 'Push' ? '每条正文35—55个汉字并以“投资有风险，入市需谨慎”收尾。' : '不在正文重复风险提示，系统将统一追加。'}`;
 }
 function cleanResult(value, topic, candidateMode, contentType, sourceRefs) { if (candidateMode) { const candidates = (value.candidates || []).map(x => ({ title: clean(x?.title, 160), body: contentType === '私域营销文案' ? ensurePrivateMarketingEmoji(x?.body) : clean(x?.body, 3000) })).filter(x => x.body).slice(0, 3); if (!candidates.length) throw Error('MODEL_INVALID_RESPONSE'); return { candidates, sources: sourceRefs }; } const body = clean(value.body, 12000); if (!body) throw Error('MODEL_INVALID_RESPONSE'); return { title: clean(value.title, 200) || topic || '期市内容初稿', body, sources: sourceRefs }; }
@@ -97,7 +105,7 @@ async function runAgents(input, provider) {
   const research = await ask(provider, souls['研究君'], `${context}\n只输出 {"facts":[],"researchAnalysis":[],"gaps":[],"boundaries":[]}`, candidateMode ? 1200 : 2400);
   const plan = await ask(provider, souls['总编辑'], `${context}\n研究结果：${research.content}\n只输出 {"outline":[],"audience":"","tone":"","checks":[]}`, 700);
   const writer = await ask(provider, souls['内容君'], productionPrompt({ ...input, candidateMode, plan: plan.content, profile: input.learningProfile, caseExamples: input.caseExamples, souls }), candidateMode ? 1300 : 2800);
-  const reviewer = await ask(provider, souls['审查君'], `用户输入：${context}\n研究结果：${research.content}\n总编辑任务：${plan.content}\n写作初稿：${writer.content}\n只输出与写作初稿完全同构的 JSON。`, candidateMode ? 1300 : 2800);
+  const reviewer = await ask(provider, souls['审查君'], `用户输入：${context}\n研究结果：${research.content}\n总编辑任务：${plan.content}\n写作初稿：${writer.content}\n${input.contentType === '私域营销文案' ? '必须对照案例保留其篇幅、分段、Emoji及品牌语气；删除正文中的媒体归因、来源、网址与链接。不要把营销短文扩写为研究文章。' : ''}\n只输出与写作初稿完全同构的 JSON。`, candidateMode ? 1300 : 2800);
   return { result: cleanResult(json(reviewer.content, json(writer.content, {})), input.topic, candidateMode, input.contentType, input.sourceRefs), agentRun: SOUL_NAMES.map((name) => ({ name, status: 'completed' })), model: writer.model };
 }
 module.exports = async (req, res) => {
