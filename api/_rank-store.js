@@ -1,6 +1,5 @@
 const {supabase}=require('./_supabase');
 const {POLICY,articleLink,isRoundup}=require('./_news-policy');
-const {deterministicGroups,mergeGroups}=require('./_event-consolidation');
 async function readRanking(){
   try {const rows=await supabase('/rest/v1/omnidata_hotspot_rankings?id=eq.current&select=payload,source_refreshed_at,generated_at&limit=1');return rows?.[0]||null;}
   catch(error){if(['PGRST205','42P01'].includes(error.code))return null;throw error;}
@@ -41,12 +40,12 @@ function rankingItems(payload){
     if(!sourceUrl)return null;
     return {...item,category:presentationCategory(item),sourceUrl,sources:sources.length?sources:[{name:item.source||'已核验信源',url:sourceUrl,publishedAt:item.publishedAt,grade:item.grade,title:item.title,excerpt:item.summary||''}]};
   }).filter(Boolean);
-  const indexed=eligible.map((item,index)=>({...item,id:item.id||`published-${index}`}));
-  // A malformed legacy cache entry must never make the entire hotspot and
-  // source-monitoring API unavailable. It can safely be displayed unmerged
-  // while the background job writes a normalized replacement.
-  try{return mergeGroups(indexed,deterministicGroups(indexed));}
-  catch(error){console.warn('Cached ranking dedup skipped',error.name);return eligible;}
+  // The payload has already been event-clustered and ranked before publication.
+  // Running broad semantic grouping again when a reader opens the page was
+  // collapsing unrelated items and turning a Top 100 into a few dozen cards.
+  // Only strict identity de-duplication above is safe at read time; preserve
+  // the published score order and replenish from the saved candidate pool.
+  return eligible.slice(0,100);
 }
 function rankingResponse(row){
   const {_pool,...payload}=row.payload||{},items=rankingItems(row.payload||{}).map(({scoringReasons,scoringEvidence,reports,summaryEvidence,summaryInputKey,...item})=>item);
