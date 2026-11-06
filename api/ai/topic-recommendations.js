@@ -26,7 +26,7 @@ function cleanItems(value) {
 }
 function cleanCases(value) {
   return (Array.isArray(value) ? value : []).slice(0, 60).filter(item => item && typeof item.title === 'string').map(item => ({
-    title: item.title.slice(0, 100), type: String(item.content_type || item.contentType || '').slice(0, 40),
+    title: item.title.slice(0, 100), type: String(item.content_type || item.contentType || item.type || '').slice(0, 40),
     subtype: String(item.subtype || '').slice(0, 40),
   }));
 }
@@ -66,12 +66,12 @@ function validate(items, payload) {
   return result;
 }
 async function request(items, cases, provider) {
-  const config = ENDPOINTS[provider], key = process.env[config.key];
+  const config = ENDPOINTS[provider], key = String(process.env[config.key] || '').trim();
   if (!key) throw Error('MODEL_NOT_CONFIGURED');
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 25000);
   try {
     const response = await fetch(config.url, { method: 'POST', signal: controller.signal, headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({
-      model: process.env[config.model] || config.fallback, stream: false, temperature: 0.1,
+      model: String(process.env[config.model] || '').trim() || config.fallback, stream: false, temperature: 0.1,
       ...(provider === 'DeepSeek' ? { max_tokens: 1800, thinking: { type: 'disabled' }, response_format: { type: 'json_object' } } : { max_completion_tokens: 1800 }),
       messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: JSON.stringify({ hotspots: items, caseLibraryExamples: cases }) }],
     }) });
@@ -81,7 +81,7 @@ async function request(items, cases, provider) {
     const parsed = JSON.parse(raw.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim());
     const recommendations = validate(items, parsed);
     if (!recommendations.length) throw Error('MODEL_INVALID_RESPONSE');
-    return { recommendations, provider, model: process.env[config.model] || config.fallback };
+    return { recommendations, provider, model: String(process.env[config.model] || '').trim() || config.fallback };
   } finally { clearTimeout(timer); }
 }
 async function recommend(items, cases) {
@@ -98,7 +98,8 @@ module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'private, no-store');
   if (req.method !== 'POST') return send(res, 405, { error: 'METHOD_NOT_ALLOWED' });
   try {
-    await currentProfile(req);
+    // Recommendations are a read-only operation despite the JSON POST transport.
+    await currentProfile({method:'GET',headers:req.headers});
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const items = cleanItems(body.items), cases = cleanCases(body.cases);
     if (!items.length) return send(res, 400, { error: 'NO_HOTSPOTS' });
