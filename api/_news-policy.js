@@ -1,7 +1,7 @@
 // v8 widens the deterministic backstop for linked domestic / primary-source
 // market notices.  It exists to recover from partial model batches without
 // relaxing the source-link, same-day or media-roundup exclusions.
-const POLICY='futures-news-v12-highest-score-single-event-top100';
+const POLICY='futures-news-v13-aggregate-and-category-guard';
 const DAY=86400000,ZONE=8*3600000;
 const DISABLED=/金十|jin10|eastmoney|东方财富/i;
 const OFFICIAL_HOSTS=['pbc.gov.cn','stats.gov.cn','ndrc.gov.cn','customs.gov.cn','mof.gov.cn','mofcom.gov.cn','moa.gov.cn','nea.gov.cn','csrc.gov.cn','shfe.com.cn','dce.com.cn','czce.com.cn','cffex.com.cn','gfex.com.cn','ine.cn','federalreserve.gov','eia.gov','bls.gov','bea.gov','usda.gov','ecb.europa.eu','boj.or.jp','imf.org','oecd.org'];
@@ -17,7 +17,7 @@ function articleLink(value){
   }catch(_){return '';}
 }
 function sourceGrade(url){try{const host=new URL(url).hostname.toLowerCase();return OFFICIAL_HOSTS.some(h=>host===h||host.endsWith('.'+h))&&articleLink(url)?'A类信源':'B类·已核验';}catch(_){return 'B类·已核验';}}
-function isRoundup(title){return /华尔街见闻.{0,6}早餐|(?:金十|财联社|华尔街见闻|同花顺|格隆汇|新浪|第一财经|金融界).{0,8}(?:整理|汇总|早报|晚报|早餐)|(?:财经|市场|期货|商品|全球|隔夜|盘前|今日|昨日|每日|一周|本周).{0,8}(?:早报|晚报|早餐|要闻汇总|快讯汇总|新闻汇总|资讯汇总|一览|速览|复盘)|(?:早间|晚间|隔夜).{0,6}(?:要闻|必读)|(?:早报|晚报|早餐|快讯汇总|要闻汇总|新闻汇总|金十数据整理)/i.test(String(title||''));}
+function isRoundup(title){return /华尔街见闻.{0,6}早餐|(?:金十|财联社|华尔街见闻|同花顺|格隆汇|新浪|第一财经|金融界).{0,8}(?:整理|汇总|早报|晚报|早餐)|(?:财经|市场|期货|商品|全球|隔夜|盘前|今日|昨日|每日|一周|本周).{0,8}(?:早报|晚报|早餐|要闻汇总|快讯汇总|新闻汇总|资讯汇总|一览|速览|复盘)|(?:早间|晚间|隔夜).{0,8}(?:要闻|必读|精选|新闻精选|资讯精选|市场精选)|(?:早报|晚报|早餐|快讯汇总|要闻汇总|新闻汇总|金十数据整理)/i.test(String(title||''));}
 function chinaDate(ms=Date.now()){return new Date(ms+ZONE).toISOString().slice(0,10);}
 function dayStart(ms=Date.now()){return Date.parse(chinaDate(ms)+'T00:00:00+08:00');}
 function priorTradingDay(ms){let d=dayStart(ms)-DAY;const holidays=new Set((process.env.HOTSPOT_TRADING_HOLIDAYS||'').split(','));while([0,6].includes(new Date(d+ZONE).getUTCDay())||holidays.has(chinaDate(d)))d-=DAY;return d;}
