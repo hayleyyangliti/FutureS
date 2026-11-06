@@ -24,6 +24,21 @@ function presentationCategory(item){
   if((item?.category==='农产品'&&!AGRICULTURE_EVIDENCE.test(evidence))||(MACRO_INFRASTRUCTURE.test(evidence)&&!AGRICULTURE_EVIDENCE.test(evidence)))return '宏观';
   return item?.category||'宏观';
 }
+function normalizedHeadline(value){return String(value||'').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu,'');}
+function headlinePairs(value){const chars=Array.from(value);return new Set(chars.slice(1).map((char,index)=>chars[index]+char));}
+function pairSimilarity(left,right){const a=headlinePairs(left),b=headlinePairs(right);return [...a].filter(pair=>b.has(pair)).length/Math.max(a.size,b.size,1);}
+function samePublishedEvent(left,right){
+  if(left?.sourceUrl&&left.sourceUrl===right?.sourceUrl)return true;
+  const a=normalizedHeadline(left?.title),b=normalizedHeadline(right?.title);
+  if(!a||!b)return false;
+  if(a===b)return true;
+  const at=Date.parse(left?.publishedAt||''),bt=Date.parse(right?.publishedAt||'');
+  // Only collapse headline rewrites when they refer to the same release time.
+  // This catches syndicated versions such as “秋粮收获过九成” versus
+  // “秋粮丰收成定局”, without merging separate developments in a topic.
+  return Number.isFinite(at)&&Number.isFinite(bt)&&Math.abs(at-bt)<=2*60*1000&&
+    Math.min(a.length,b.length)>=7&&pairSimilarity(a,b)>=.34;
+}
 function rankingItems(payload){
   // A stored ranking is already admitted and scored for its collection window.
   // Do not apply a second moving "now" window when the reader opens the page:
@@ -40,12 +55,13 @@ function rankingItems(payload){
     if(!sourceUrl)return null;
     return {...item,category:presentationCategory(item),sourceUrl,sources:sources.length?sources:[{name:item.source||'已核验信源',url:sourceUrl,publishedAt:item.publishedAt,grade:item.grade,title:item.title,excerpt:item.summary||''}]};
   }).filter(Boolean);
-  // The payload has already been event-clustered and ranked before publication.
-  // Running broad semantic grouping again when a reader opens the page was
-  // collapsing unrelated items and turning a Top 100 into a few dozen cards.
-  // Only strict identity de-duplication above is safe at read time; preserve
-  // the published score order and replenish from the saved candidate pool.
-  return eligible.slice(0,100);
+  // The payload is already ranked. Apply only a narrow, high-confidence
+  // duplicate guard at read time and retain the higher-scored representative.
+  const retained=[];
+  for(const item of [...eligible].sort((a,b)=>(b.score||0)-(a.score||0)||Date.parse(b.publishedAt||0)-Date.parse(a.publishedAt||0))){
+    if(!retained.some(existing=>samePublishedEvent(existing,item)))retained.push(item);
+  }
+  return retained.slice(0,100);
 }
 function rankingResponse(row){
   const {_pool,...payload}=row.payload||{},items=rankingItems(row.payload||{}).map(({scoringReasons,scoringEvidence,reports,summaryEvidence,summaryInputKey,...item})=>item);
