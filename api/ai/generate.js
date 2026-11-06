@@ -27,6 +27,11 @@ const AGENT_SOULS = {
 合规红线：禁止收益承诺、确定性涨跌、直接交易指令、夸大宣传、伪造来源与遗漏必要风险提示；期货内容须避免让读者误解为投资建议。
 输出标准：返回与初稿同构、可直接编辑的成稿；如无合格证据，不以补造内容替代核验。`,
 };
+const PRODUCTION_STYLE_RULES = `本次生产的统一规则（优先于旧版角色模板中的冲突要求）：
+所有内容类型都必须读取匹配的案例正文，优先同类目同二级场景，其次同类目；案例仅用于学习品牌语气、标题方式、结构顺序、段落节奏、篇幅、Emoji密度、术语和收尾方式，不作为本次事实来源。
+总编辑必须先从案例中提炼styleGuide，写明样本标题、典型结构、目标字数、段落/句长、语气、排版、Emoji及结尾规则；内容君逐项执行，审查君逐项对照案例检查并修订。不得用通用模板代替案例风格。
+用户明确提供的数据、材料与事实作为本次创作依据直接使用，不要求再次核验，不在正文给这些内容添加“待核验”“尚待核实”“请核验”等字样。缺失的数据应省略或在内部gaps记录，不得臆造，也不得把内部缺口清单写入成稿。
+案例中的历史数字、日期、结论和机构观点不得挪用到新主题。`;
 const SOUL_NAMES = Object.keys(AGENT_SOULS);
 async function activeSouls() {
   // Global Soul settings are stored server-side.  A missing configuration is
@@ -101,16 +106,18 @@ async function ask(provider, system, user, maxTokens = 900) {
 function productionPrompt({ topic, instruction, contentType, subtype, candidateMode, plan, profile, caseExamples, souls }) {
   const format = candidateMode ? '{"candidates":[{"title":"候选标题","body":"候选正文"},{"title":"候选标题","body":"候选正文"},{"title":"候选标题","body":"候选正文"}]}' : '{"title":"内容标题","body":"可直接编辑的完整正文","sources":["用户明确提供的来源名称"]}';
   const privateRule = contentType === '私域营销文案' ? '私域文案必须以匹配的历史案例为首要表达标准：先提炼案例的字数范围、分段、句长、开头钩子、Emoji位置与密度、结尾引导，再按这些特征写作；禁止把新闻摘要或研究长文换上Emoji充当营销文案。相同场景案例优先，缺少同场景时学习同类型案例。3条候选使用不同开头和角度，避免同义改写。案例未提供完整正文时采用80—160字、2—4短段、2—4个相关Emoji的简短私域表达，不虚称已学习案例。正文严禁出现媒体名称、据某媒体报道、来源段落、网址、Markdown链接或引用编号；可追溯来源由系统在独立资料来源区域展示。风险提示由系统追加。' : '';
-  return `${souls['内容君']}\n\n请为期市内容引擎撰写中文期货市场内容。仅输出 JSON：${format}\n内容类型：${contentType}\n具体场景：${subtype || '未指定'}\n选题：${topic || '未指定'}\n生成指令：${instruction || '围绕选题生成专业、克制、可供人工编辑的内容。'}\n研究规划：${plan}\n用户已确认的表达偏好：${profile || '暂无，按专业、克制、清晰执行。'}\n案例库样本（只学习风格，不可复用其中事实）：${JSON.stringify(caseExamples || [])}\n硬性要求：只能基于输入事实；缺少事实时使用待核验表述，绝不杜撰数据、日期、来源或机构观点；不提供买卖指令或收益承诺；正文为纯文本；资料来源仅填写用户明确提供的名称；${privateRule}${contentType === 'Push' ? '每条正文35—55个汉字并以“投资有风险，入市需谨慎”收尾。' : '不在正文重复风险提示，系统将统一追加。'}`;
+  return `${souls['内容君']}\n\n请为期市内容引擎撰写中文期货市场内容。仅输出 JSON：${format}\n内容类型：${contentType}\n具体场景：${subtype || '未指定'}\n选题：${topic || '未指定'}\n生成指令：${instruction || '围绕选题生成专业、克制、可供人工编辑的内容。'}\n研究规划：${plan}\n用户已确认的表达偏好：${profile || '暂无，按专业、克制、清晰执行。'}\n案例库样本（只学习风格，不可复用其中事实）：${JSON.stringify(caseExamples || [])}\n硬性要求：只能基于输入事实；用户提供的数据直接用于创作且不标注待核验；缺少事实则省略，不杜撰数据、日期、来源或机构观点；不提供买卖指令或收益承诺；正文为纯文本；资料来源仅填写用户明确提供的名称；${privateRule}${contentType === 'Push' ? '每条正文35—55个汉字并以“投资有风险，入市需谨慎”收尾。' : '不在正文重复风险提示，系统将统一追加。'}`;
 }
 function cleanResult(value, topic, candidateMode, contentType, sourceRefs) { if (candidateMode) { const candidates = (value.candidates || []).map(x => ({ title: clean(x?.title, 160), body: contentType === '私域营销文案' ? ensurePrivateMarketingEmoji(x?.body) : clean(x?.body, 3000) })).filter(x => x.body).slice(0, 3); if (!candidates.length) throw Error('MODEL_INVALID_RESPONSE'); return { candidates, sources: sourceRefs }; } const body = clean(value.body, 12000); if (!body) throw Error('MODEL_INVALID_RESPONSE'); return { title: clean(value.title, 200) || topic || '期市内容初稿', body, sources: sourceRefs }; }
 async function runAgents(input, provider) {
-  const souls = await activeSouls();
+  const configured = await activeSouls();
+  const souls = Object.fromEntries(Object.entries(configured).map(([name, soul]) => [name, `${soul}\n\n${PRODUCTION_STYLE_RULES}`]));
+  if (!input.caseExamples.length) throw Error('MATCHING_CASES_REQUIRED');
   const context = JSON.stringify({ topic: input.topic, instruction: input.instruction, contentType: input.contentType, subtype: input.subtype, learningProfile: input.learningProfile || '', sourceRefs: input.sourceRefs.map(({ title, name, url }) => ({ title, name, url })), caseExamples: input.caseExamples });
   const candidateMode = ['Push', '私域营销文案'].includes(input.contentType);
   const research = await ask(provider, souls['研究君'], `${context}\n只输出 {"facts":[],"researchAnalysis":[],"gaps":[],"boundaries":[]}`, candidateMode ? 1200 : 2400);
-  const plan = await ask(provider, souls['总编辑'], `${context}\n研究结果：${research.content}\n只输出 {"outline":[],"audience":"","tone":"","checks":[]}`, 700);
-  const writer = await ask(provider, souls['内容君'], productionPrompt({ ...input, candidateMode, plan: plan.content, profile: input.learningProfile, caseExamples: input.caseExamples, souls }), candidateMode ? 1300 : 2800);
+  const plan = await ask(provider, souls['总编辑'], `${context}\n研究结果：${research.content}\n只输出 {"styleGuide":{"sampleTitles":[],"structure":[],"targetLength":"","paragraphs":"","tone":"","format":"","emoji":"","ending":""},"outline":[],"audience":"","tone":"","checks":[]}`, 700);
+  const writer = await ask(provider, souls['内容君'], productionPrompt({ ...input, candidateMode, plan: `${plan.content}\n研究事实与用户材料：${research.content}`, profile: input.learningProfile, caseExamples: input.caseExamples, souls }), candidateMode ? 1300 : 2800);
   const reviewer = await ask(provider, souls['审查君'], `用户输入：${context}\n研究结果：${research.content}\n总编辑任务：${plan.content}\n写作初稿：${writer.content}\n${input.contentType === '私域营销文案' ? '必须对照案例保留其篇幅、分段、Emoji及品牌语气；删除正文中的媒体归因、来源、网址与链接。不要把营销短文扩写为研究文章。' : ''}\n只输出与写作初稿完全同构的 JSON。`, candidateMode ? 1300 : 2800);
   return { result: cleanResult(json(reviewer.content, json(writer.content, {})), input.topic, candidateMode, input.contentType, input.sourceRefs), agentRun: SOUL_NAMES.map((name) => ({ name, status: 'completed' })), model: writer.model };
 }
@@ -120,8 +127,9 @@ module.exports = async (req, res) => {
     await currentProfile(req);
     const raw = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {}), provider = clean(raw.model, 40) || 'MiniMax';
     if (!ENDPOINTS[provider]) return send(res, 400, { error: 'UNSUPPORTED_MODEL' });
-    const input = { topic: clean(raw.topic, 1000), instruction: clean(raw.instruction), contentType: clean(raw.contentType, 80) || '营销页面文案', subtype: clean(raw.subtype, 120), learningProfile: clean(raw.learningProfile, 1800), sourceRefs: cleanSourceRefs(raw.sourceRefs), caseExamples: cleanCaseExamples(raw.caseExamples) };
+    const input = { topic: clean(raw.topic, 1000), instruction: clean(raw.instruction), contentType: clean(raw.contentType, 80) || '营销页面文案', subtype: clean(raw.subtype, 120), learningProfile: clean(raw.learningProfile, 1800), sourceRefs: cleanSourceRefs(raw.sourceRefs), caseExamples: cleanCaseExamples(raw.caseExamples).filter(row => row.contentType === (clean(raw.contentType, 80) || '营销页面文案') && row.content.trim()) };
     if (!input.topic && !input.instruction) return send(res, 400, { error: 'GENERATION_INPUT_REQUIRED' });
+    if (!input.caseExamples.length) return send(res, 400, { error: 'MATCHING_CASES_REQUIRED' });
     const output = await runAgents(input, provider);
     return send(res, 200, { ...output.result, model: output.model, provider, agentRun: output.agentRun });
   } catch (error) {
