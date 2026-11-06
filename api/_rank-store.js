@@ -16,6 +16,15 @@ async function finishJob(key,token,status,detail){return await supabase('/rest/v
 function rankingIdentity(item){
   return String(item?.eventKey||item?.sourceUrl||`${item?.title||''}\u0000${item?.publishedAt||''}`);
 }
+const AGRICULTURE_EVIDENCE=/豆[粕油]|大豆|玉米|小麦|棉花|白糖|生猪|鸡蛋|苹果|红枣|油脂|粮食|农产品|饲料|收储|播种|收割|农业农村/;
+const MACRO_INFRASTRUCTURE=/人工智能|\bAI\b|新型基础设施|新基建|算力|机器人|数字经济|何立峰/;
+function presentationCategory(item){
+  const evidence=`${item?.title||''} ${item?.summary||''}`;
+  // Never classify broad policy/technology news as agriculture merely because
+  // a model supplied a stale label; a product or agricultural fact is required.
+  if((item?.category==='农产品'&&!AGRICULTURE_EVIDENCE.test(evidence))||(MACRO_INFRASTRUCTURE.test(evidence)&&!AGRICULTURE_EVIDENCE.test(evidence)))return '宏观';
+  return item?.category||'宏观';
+}
 function rankingItems(payload){
   // A stored ranking is already admitted and scored for its collection window.
   // Do not apply a second moving "now" window when the reader opens the page:
@@ -30,7 +39,7 @@ function rankingItems(payload){
     const sources=(Array.isArray(item.sources)?item.sources:[]).map(source=>({...source,url:articleLink(source?.url)})).filter(source=>source.url).slice(0,3);
     const sourceUrl=articleLink(item.sourceUrl)||sources[0]?.url||'';
     if(!sourceUrl)return null;
-    return {...item,sourceUrl,sources:sources.length?sources:[{name:item.source||'已核验信源',url:sourceUrl,publishedAt:item.publishedAt,grade:item.grade,title:item.title,excerpt:item.summary||''}]};
+    return {...item,category:presentationCategory(item),sourceUrl,sources:sources.length?sources:[{name:item.source||'已核验信源',url:sourceUrl,publishedAt:item.publishedAt,grade:item.grade,title:item.title,excerpt:item.summary||''}]};
   }).filter(Boolean);
   const indexed=eligible.map((item,index)=>({...item,id:item.id||`published-${index}`}));
   // A malformed legacy cache entry must never make the entire hotspot and
