@@ -50,6 +50,15 @@ function samePublishedEvent(left,right){
   if(!Number.isFinite(at)||!Number.isFinite(bt)||Math.abs(at-bt)>2*60*1000)return false;
   const factsA=eventFacts(left?.title),factsB=eventFacts(right?.title);
   const shared=[...factsA].filter(fact=>factsB.has(fact));
+  const leftFacts=`${left?.title||''} ${left?.summary||''}`,rightFacts=`${right?.title||''} ${right?.summary||''}`;
+  // A named issuer's same market/product/pricing action is a single release
+  // even when one title adds a record-low detail and it arrives a few minutes
+  // after the original flash. This also protects readers of an older cache
+  // while the model-generated replacement is being published.
+  const sameSaudiAsianOilPricing=/沙特|阿美/.test(leftFacts)&&/沙特|阿美/.test(rightFacts)&&
+    /亚洲/.test(leftFacts)&&/亚洲/.test(rightFacts)&&/原油.{0,12}售价|售价.{0,12}原油/.test(leftFacts)&&
+    /原油.{0,12}售价|售价.{0,12}原油/.test(rightFacts)&&/下调|降低/.test(leftFacts)&&/下调|降低/.test(rightFacts);
+  if(sameSaudiAsianOilPricing&&Math.abs(at-bt)<=24*60*60*1000)return true;
   // A timestamp alone or generic Chinese word overlap is never enough. A
   // rewrite must share an explicit factual event and meaningful wording.
   return shared.length>0&&pairSimilarity(a,b)>=.22;
