@@ -107,11 +107,15 @@ function ruleFallback(item){
   const directMarket=Array.isArray(item.contracts)&&item.contracts.length>0;
   const primaryDomesticNotice=item.grade==='A类信源'&&item.scope==='domestic'&&(item.articleChars||0)>=24;
   const longLinkedReport=(item.articleChars||0)>=130;
-  // Most flash feeds only provide a short excerpt.  A short item remains
-  // excluded unless it is an original, linked, domestic A-source notice with
-  // a concrete market driver.  All other fallback entries retain the 130-char
-  // report threshold requested for ordinary media news.
-  if((!longLinkedReport&&!primaryDomesticNotice)||!concreteDriver||(!directMarket&&!/央行|利率|CPI|PPI|GDP|PMI|财政|货币政策|进出口|采购经理指数/.test(facts)))return null;
+  // Full linked reports can provide lower-ranked coverage when the model is
+  // conservative. They still need an explicit futures, commodity, supply,
+  // trade, macro-policy or market-transmission signal; generic business,
+  // property, health and collection news remain out.
+  const linkedMarketReport=longLinkedReport&&(directMarket||/期货|商品|农产品|粮食|油脂|原油|天然气|煤炭|钢铁|铁矿|有色|贵金属|黄金|白银|铜|铝|镍|锌|化工|橡胶|PVC|玻璃|焦煤|焦炭|棉花|白糖|生猪|大豆|豆粕|玉米|小麦|库存|产量|供给|需求|进口|出口|通关|港口|航运|运河|海峡|关税|制裁|货币政策|利率|通胀|CPI|PPI|GDP|PMI|央行|财政|外贸/.test(facts));
+  // Short flashes remain restricted to primary domestic notices. Long,
+  // source-linked market reports are allowed as backfill candidates so the
+  // ranking can retain its intended Top 100 breadth on quiet news cycles.
+  if((!longLinkedReport&&!primaryDomesticNotice)||(!linkedMarketReport&&(!concreteDriver||(!directMarket&&!/央行|利率|CPI|PPI|GDP|PMI|财政|货币政策|进出口|采购经理指数/.test(facts)))))return null;
   const theme=fallbackTheme(item),scope=item.scope||'other';
   if(theme==='geopolitics'&&!/原油|石油|天然气|航运|运河|海峡|油轮|供应|出口|进口/.test(facts))return null;
   const importance=Math.min(35,(item.grade==='A类信源'?26:17)+(scope==='domestic'?5:0)+(theme==='supply'||theme==='logistics'||theme==='inventory'?4:0));
