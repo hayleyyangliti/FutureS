@@ -27,17 +27,32 @@ function presentationCategory(item){
 function normalizedHeadline(value){return String(value||'').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu,'');}
 function headlinePairs(value){const chars=Array.from(value);return new Set(chars.slice(1).map((char,index)=>chars[index]+char));}
 function pairSimilarity(left,right){const a=headlinePairs(left),b=headlinePairs(right);return [...a].filter(pair=>b.has(pair)).length/Math.max(a.size,b.size,1);}
+function eventFacts(value){
+  const text=String(value||'');
+  const facts=[];
+  if(/秋粮/.test(text)&&/(收获|丰收)/.test(text))facts.push('秋粮丰收');
+  for(const [name,rule] of [
+    ['公开市场回购',/公开市场|逆回购|净回笼/],['外贸进出口',/外贸|进出口/],
+    ['原油供应',/原油|油田|油轮|欧佩克|OPEC/],['航运通道',/霍尔木兹|苏伊士|红海|海峡|运河/],
+    ['产量供给',/产量|减产|停产|复产|开工/],['库存变化',/库存|储备/],
+    ['贸易关税',/关税|制裁/],['货币政策',/降息|加息|利率|央行/],
+    ['农业作物',/大豆|豆粕|玉米|小麦|棉花|白糖|生猪/],
+    ['有色金属',/黄金|白银|铜|铝|镍|锌/]
+  ])if(rule.test(text))facts.push(name);
+  return new Set(facts);
+}
 function samePublishedEvent(left,right){
   if(left?.sourceUrl&&left.sourceUrl===right?.sourceUrl)return true;
   const a=normalizedHeadline(left?.title),b=normalizedHeadline(right?.title);
   if(!a||!b)return false;
   if(a===b)return true;
   const at=Date.parse(left?.publishedAt||''),bt=Date.parse(right?.publishedAt||'');
-  // Only collapse headline rewrites when they refer to the same release time.
-  // This catches syndicated versions such as “秋粮收获过九成” versus
-  // “秋粮丰收成定局”, without merging separate developments in a topic.
-  return Number.isFinite(at)&&Number.isFinite(bt)&&Math.abs(at-bt)<=2*60*1000&&
-    Math.min(a.length,b.length)>=7&&pairSimilarity(a,b)>=.34;
+  if(!Number.isFinite(at)||!Number.isFinite(bt)||Math.abs(at-bt)>2*60*1000)return false;
+  const factsA=eventFacts(left?.title),factsB=eventFacts(right?.title);
+  const shared=[...factsA].filter(fact=>factsB.has(fact));
+  // A timestamp alone or generic Chinese word overlap is never enough. A
+  // rewrite must share an explicit factual event and meaningful wording.
+  return shared.length>0&&pairSimilarity(a,b)>=.22;
 }
 function rankingItems(payload){
   // A stored ranking is already admitted and scored for its collection window.
