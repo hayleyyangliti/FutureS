@@ -80,11 +80,11 @@ function ensurePrivateMarketingEmoji(value) {
   if (!body) return body;
   return hasEmoji(body) ? body : `📌 ${body}\n\n✨ 关注后续公开信息与风险变化。`;
 }
-function settings(provider) { const deep = provider === 'DeepSeek', key = clean(process.env[deep ? 'DEEPSEEK_API_KEY' : 'MINIMAX_API_KEY'], 1000); if (!key) throw Error(deep ? 'DEEPSEEK_NOT_CONFIGURED' : 'MINIMAX_NOT_CONFIGURED'); return { deep, key, model: deep ? (process.env.DEEPSEEK_MODEL || 'deepseek-flash') : (process.env.MINIMAX_MODEL || 'MiniMax-M2.7') }; }
+function settings(provider) { const deep = provider === 'DeepSeek', key = clean(process.env[deep ? 'DEEPSEEK_API_KEY' : 'MINIMAX_API_KEY'], 1000); if (!key) throw Error(deep ? 'DEEPSEEK_NOT_CONFIGURED' : 'MINIMAX_NOT_CONFIGURED'); return { deep, key, model: deep ? (clean(process.env.DEEPSEEK_MODEL, 100) || 'deepseek-flash') : (process.env.MINIMAX_MODEL || 'MiniMax-M2.7') }; }
 async function ask(provider, system, user, maxTokens = 900) {
   const config = settings(provider), controller = new AbortController(), timer = setTimeout(() => controller.abort(), 40000);
   try {
-    const response = await fetch(ENDPOINTS[provider], { method: 'POST', signal: controller.signal, headers: { Authorization: `Bearer ${config.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: config.model, stream: false, temperature: .35, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...(config.deep ? { max_tokens: maxTokens, response_format: { type: 'json_object' }, thinking: { type: 'disabled' } } : { max_completion_tokens: maxTokens }) }) });
+    const response = await fetch(ENDPOINTS[provider], { method: 'POST', signal: controller.signal, headers: { Authorization: `Bearer ${config.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: config.model, stream: false, temperature: .35, messages: [{ role: 'system', content: config.deep ? `${system}\n只输出一个合法 JSON 对象，不输出其他文字。` : system }, { role: 'user', content: user }], ...(config.deep ? { max_tokens: maxTokens, response_format: { type: 'json_object' }, thinking: { type: 'disabled' } } : { max_completion_tokens: maxTokens }) }) });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload?.base_resp?.status_code) {
       // Return actionable codes without leaking provider responses or secrets.
