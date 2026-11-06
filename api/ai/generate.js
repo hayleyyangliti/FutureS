@@ -86,7 +86,13 @@ async function ask(provider, system, user, maxTokens = 900) {
   try {
     const response = await fetch(ENDPOINTS[provider], { method: 'POST', signal: controller.signal, headers: { Authorization: `Bearer ${config.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: config.model, stream: false, temperature: .35, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...(config.deep ? { max_tokens: maxTokens, response_format: { type: 'json_object' }, thinking: { type: 'disabled' } } : { max_completion_tokens: maxTokens }) }) });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload?.base_resp?.status_code) throw Error(config.deep ? 'DEEPSEEK_REQUEST_FAILED' : 'MINIMAX_REQUEST_FAILED');
+    if (!response.ok || payload?.base_resp?.status_code) {
+      // Return actionable codes without leaking provider responses or secrets.
+      const prefix=config.deep?'DEEPSEEK':'MINIMAX';
+      const reason=({400:'INVALID_PARAMETERS',401:'INVALID_API_KEY',402:'INSUFFICIENT_BALANCE',403:'ACCESS_DENIED',404:'MODEL_NOT_AVAILABLE',422:'INVALID_PARAMETERS',429:'RATE_LIMITED',500:'PROVIDER_UNAVAILABLE',503:'PROVIDER_UNAVAILABLE'})[response.status]||'REQUEST_FAILED';
+      console.warn('AI provider request failed',{provider,status:response.status,model:config.model});
+      throw Error(prefix+'_'+reason);
+    }
     const content = payload?.choices?.[0]?.message?.content;
     if (!content) throw Error(config.deep ? 'DEEPSEEK_EMPTY_RESPONSE' : 'MINIMAX_EMPTY_RESPONSE');
     return { content, model: config.model };
