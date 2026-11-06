@@ -1,19 +1,36 @@
 {
   "version": 2,
   "functions": {
-    "api/market-hotspots.js": { "maxDuration": 240 },
-    "api/internal/hotspot-refresh.js": { "maxDuration": 300 },
-    "api/ai/generate.js": { "maxDuration": 180 }
+    "api/market-hotspots.js": {
+      "maxDuration": 240
+    },
+    "api/internal/hotspot-refresh.js": {
+      "maxDuration": 300
+    },
+    "api/ai/generate.js": {
+      "maxDuration": 180
+    },
+    "api/ai/topic-recommendations.js": {
+      "maxDuration": 120
+    }
   },
   "headers": [
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        }
       ]
     }
   ]
 }
-
